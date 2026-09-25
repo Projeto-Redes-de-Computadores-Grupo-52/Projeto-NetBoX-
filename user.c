@@ -20,16 +20,18 @@
 #define UID_SIZE 6
 #define PWD_SIZE 8
 
-int init_connection(char *ip, char *port, int *fd, struct addrinfo *hints, struct addrinfo **res) {
+int init_connection(char *ip, char *port, int *fd, struct addrinfo **res) { // we use fd and res from the main since we'll need them for every command
+
+    struct addrinfo hints;
 
     *fd = socket(AF_INET, SOCK_DGRAM, 0); // UDP socket
     if (*fd == -1) return 1;
 
-    memset(hints, 0, sizeof(*hints));
-    hints->ai_family = AF_INET; //IPv4
-    hints->ai_socktype = SOCK_DGRAM; //UDP socket
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET; //IPv4
+    hints.ai_socktype = SOCK_DGRAM; //UDP socket
 
-    if (getaddrinfo(ip, port, hints, res) != 0) return 1;
+    if (getaddrinfo(ip, port, &hints, res) != 0) return 1;
 
     return 0;
 }
@@ -103,7 +105,7 @@ int login(char *uid, char* password, char *peerport, int fd, struct addrinfo *re
     if (!strcmp(message+4,"OK")) printf("Sucessful login.\n");
     else if (!strcmp(message+4,"NOK")) printf("Wrong password.\n");
     else if (!strcmp(message+4,"REG")) printf("New user registered.\n");
-    else if (!strcmp(message+4,"ERR")) printf("Error.");
+    else if (!strcmp(message+4,"ERR")) printf("Error.\n");
     
     return 0;
 }
@@ -111,15 +113,6 @@ int login(char *uid, char* password, char *peerport, int fd, struct addrinfo *re
 int unregister(char *uid, char* password, int fd, struct addrinfo *res) {
 
     char message[BUF_SIZE+1];
-
-    if (!check_uid(uid, strlen(uid))) {
-        printf("Invalid UID.\n");
-        return 1;
-    }
-    else if (!check_pwd(password,strlen(password))) {
-        printf("Invalid password.\n");
-        return 1;
-    }
 
     sprintf(message,"UNR %s %s\n", uid, password);
 
@@ -133,7 +126,7 @@ int unregister(char *uid, char* password, int fd, struct addrinfo *res) {
     else if (!strcmp(message+4,"NOK")) printf("User not logged in.\n");
     else if (!strcmp(message+4,"UNR")) printf("User not registered.\n");
     else if (!strcmp(message+4,"WRP")) printf("Wrong password.\n");
-    else if (!strcmp(message+4,"ERR")) printf("Error.");
+    else if (!strcmp(message+4,"ERR")) printf("Error.\n");
     
     return 0;
 }
@@ -141,16 +134,6 @@ int unregister(char *uid, char* password, int fd, struct addrinfo *res) {
 int logout(char *uid, char* password, int fd, struct addrinfo *res) {
 
     char message[BUF_SIZE+1];
-
-    if (!check_uid(uid, strlen(uid))) {
-        printf("Invalid UID.\n");
-        return 1;
-    }
-
-    if (!check_pwd(password,strlen(password))) {
-        printf("Invalid password.\n");
-        return 1;
-    }
 
     sprintf(message,"LOU %s %s\n", uid, password);
 
@@ -164,7 +147,7 @@ int logout(char *uid, char* password, int fd, struct addrinfo *res) {
     else if (!strcmp(message+4,"NLG")) printf("User not logged in.\n");
     else if (!strcmp(message+4,"UNR")) printf("User not registered.\n");
     else if (!strcmp(message+4,"WRP")) printf("Wrong password.\n");
-    else if (!strcmp(message+4,"ERR")) printf("Error.");
+    else if (!strcmp(message+4,"ERR")) printf("Error.\n");
     
     return 0;
 }
@@ -172,7 +155,7 @@ int logout(char *uid, char* password, int fd, struct addrinfo *res) {
 int main(int argc, char *argv[]) {
 
     int fd;
-    struct addrinfo hints, *res;
+    struct addrinfo *res;
 
     char buffer[BUF_SIZE+1]; // input from the user
     char uid[BUF_SIZE+1];
@@ -187,7 +170,7 @@ int main(int argc, char *argv[]) {
     
     // only an odd number of arguments >=3 is valid
     if (argc < 3 || argc % 2 == 0) {
-        printf("Invalid number of arguments.");
+        printf("Invalid number of arguments.\n");
         return 1;
     }
 
@@ -227,7 +210,7 @@ int main(int argc, char *argv[]) {
     }
 
     // start the UDP connection
-    if (init_connection(ip,port_s,&fd,&hints,&res)) {
+    if (init_connection(ip,port_s,&fd,&res)) {
         printf("Error: init_connection()\n");
         return 1;
     }
