@@ -8,7 +8,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#define BUF_SIZE 128
+#define BUF_SIZE 4096
 
 #define DSIP_1 "193.136.138.142"
 #define DSIP_2 "192.168.1.1"
@@ -142,13 +142,32 @@ int logout(char *uid, char* password, int fd, struct addrinfo *res) {
         return 1;
     }
 
-    // RLO OK / RLO NLG/ RLO UNR / RLO WRP
+    // RLO OK / RLO NLG / RLO UNR / RLO WRP
     if (!strcmp(message+4,"OK")) printf("Sucessful logout.\n");
     else if (!strcmp(message+4,"NLG")) printf("User not logged in.\n");
     else if (!strcmp(message+4,"UNR")) printf("User not registered.\n");
     else if (!strcmp(message+4,"WRP")) printf("Wrong password.\n");
     else if (!strcmp(message+4,"ERR")) printf("Error.\n");
     
+    return 0;
+}
+
+int list(int fd, struct addrinfo *res) {
+
+    char message[BUF_SIZE+1];
+
+    sprintf(message,"LST\n");
+
+    if (communicate(fd,message,res)) {
+        printf("Error: comunicate()");
+        return 1;
+    } 
+
+    // RLS NOK / RLS OK
+    if (!strcmp(message+4,"NOK")) printf("No published resources.\n");
+    // mostrar os ficheiros linha a linha
+    else if (!strncmp(message+4,"OK", 2)) fprintf(stdout, "%s\n", message+7); // evitar printf / scanf
+
     return 0;
 }
 
@@ -186,6 +205,7 @@ int main(int argc, char *argv[]) {
             printf("%s: Unrecognized flag.\nUsage: ./user -m (peerport) [-n (ip)] [-p (port)]",argv[i]);
             return 1;
         }
+        
         i+=2;
     }
 
@@ -240,6 +260,24 @@ int main(int argc, char *argv[]) {
         else if (!strncmp(buffer, "logout", 6)) {
             logout(uid,password,fd,res);
         }
+        
+        // publish
+        else if (!strncmp(buffer, "publish", 7)) {
+        }
+
+        // remove
+        else if (!strncmp(buffer, "remove", 6)) {
+        }
+
+        // publish
+        else if (!strncmp(buffer, "publish", 7)) {
+        }
+
+        // list
+        else if (!strncmp(buffer, "list", 4)) {
+            list(fd,res);
+        }
+        
         // exit
         else if (!strncmp(buffer, "exit", 4)) {
             freeaddrinfo(res);
