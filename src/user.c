@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -19,6 +20,33 @@
 
 #define UID_SIZE 6
 #define PWD_SIZE 8
+
+#define FILENAME_MAX_LEN 24
+
+int check_filename(char *filename) {
+
+    size_t len = strlen(filename);
+
+    // check filename length
+    if (len < 5 || len > FILENAME_MAX_LEN)
+        return 0;
+    
+    // check for .type
+    if (filename[len-4] != '.')
+        return 0;
+
+    // check filename
+    for (size_t i = 0; i < len-4; i++)
+        if (!isalnum((unsigned char)filename[i]) && filename[i] != '-' && filename[i] != '_')
+            return 0;
+
+    // check .type
+    for (size_t i = len-3; i < len; i++)
+        if (!isalnum((unsigned char)filename[i]))
+            return 0;
+
+    return 1;
+}
 
 int init_connection(char *ip, char *port, int *fd, struct addrinfo **res) { // we use fd and res from the main since we'll need them for every command
 
@@ -105,7 +133,10 @@ int login(char *uid, char* password, char *peerport, int fd, struct addrinfo *re
     if (!strcmp(message+4,"OK")) printf("Sucessful login.\n");
     else if (!strcmp(message+4,"NOK")) printf("Wrong password.\n");
     else if (!strcmp(message+4,"REG")) printf("New user registered.\n");
-    else if (!strcmp(message+4,"ERR")) printf("Error.\n");
+    else if (!strcmp(message+4,"ERR")) {
+        printf("Error.\n"); 
+        return 1;
+    }
     
     return 0;
 }
@@ -171,14 +202,48 @@ int list(int fd, struct addrinfo *res) {
     return 0;
 }
 
+int remove_resource(char *uid, char *password, char *filename, int fd, struct addrinfo *res) {
+
+    char message[BUF_SIZE+1];
+
+    if (strlen(uid) == 0) {
+        printf("User not logged in.\n");
+        return 1;
+    }
+
+    if (!check_filename(filename)) {
+        printf("Invalid filename.\n");
+        return 1;
+    }
+
+    sprintf(message, "REM %s %s %s\n", uid, password, filename);
+
+    if (communicate(fd, message, res)) {
+        printf("Error: communicate().\n");
+        return 1;
+    }
+
+    // RRM OK / RRM NOK / RRM NLG / RRM UNR / RRM WRP / RRM ERR
+    if (strncmp(message,"RRM ",4)) printf("Unexpected reply from DS.\n");
+    else if (!strcmp(message+4,"OK")) printf("Resource removed successfully.\n");
+    else if (!strcmp(message+4,"NOK")) printf("Resource not found (not published by you).\n");
+    else if (!strcmp(message+4,"NLG")) printf("User not logged in.\n");
+    else if (!strcmp(message+4,"UNR")) printf("User not registered.\n");
+    else if (!strcmp(message+4,"WRP")) printf("Wrong password.\n");
+    else if (!strcmp(message+4,"ERR")) printf("Error.\n");
+    else printf("Unexpected reply from DS.\n");
+
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
 
     int fd;
     struct addrinfo *res;
 
     char buffer[BUF_SIZE+1]; // input from the user
-    char uid[BUF_SIZE+1];
-    char password[BUF_SIZE+1];
+    char uid[BUF_SIZE+1] = "";
+    char password[BUF_SIZE+1] = "";
 
     char *peerport_s;
     char *ip = DSIP_1;
@@ -245,20 +310,37 @@ int main(int argc, char *argv[]) {
 
         // login
         if (!strncmp(buffer,"login ",6)) {
-            sscanf(buffer+6,"%s%s",uid,password);
-            if (login(uid,password,peerport_s,fd,res)) { // in case the login fails we don't want to set the user and the password
-                strcpy(uid,"");
-                strcpy(password,"");
-            };
+
+            char new_uid[BUF_SIZE+1], new_pwd[BUF_SIZE+1], extra[BUF_SIZE+1];
+            
+            if (strlen(uid) != 0)
+                printf("Already logged in as %s. Use logout first.\n", uid);
+            else if (sscanf(buffer+6,"%s %s %s",new_uid,new_pwd,extra) != 2)
+                printf("Usage: login UID password\n");
+            else if (login(new_uid,new_pwd,peerport_s,fd,res) == 0) {
+                strcpy(uid,new_uid);        // only save uid and pwd after successful login
+                strcpy(password,new_pwd);
+            }
         }
 
         // unregister
         else if (!strncmp(buffer, "unregister", 10)) {
-            unregister(uid,password,fd,res);
+            if (strlen(uid) == 0)
+                printf("User not logged in.\n");
+            else if (unregister(uid,password,fd,res) == 0) {
+                strcpy(uid,"");
+                strcpy(password,"");
+            }
         }
+        
         // logout
         else if (!strncmp(buffer, "logout", 6)) {
-            logout(uid,password,fd,res);
+            if (strlen(uid) == 0)
+                printf("User not logged in.\n");
+            else if (logout(uid,password,fd,res) == 0) {
+                strcpy(uid,"");
+                strcpy(password,"");
+            }
         }
         
         // publish
@@ -267,10 +349,17 @@ int main(int argc, char *argv[]) {
 
         // remove
         else if (!strncmp(buffer, "remove", 6)) {
+
+            char filename[BUF_SIZE+1], extra[BUF_SIZE+1];
+
+            if (sscanf(buffer+7, "%s %s", filename, extra) != 1)
+                printf("Usage: remove filename\n");
+            else
+                remove_resource(uid, password, filename, fd, res);
         }
 
-        // publish
-        else if (!strncmp(buffer, "publish", 7)) {
+        // versions
+        else if (!strncmp(buffer, "versions", 8)) {
         }
 
         // list
@@ -280,6 +369,12 @@ int main(int argc, char *argv[]) {
         
         // exit
         else if (!strncmp(buffer, "exit", 4)) {
+            
+            if (strlen(uid) != 0) {
+                printf("Please logout first.\n");
+                continue;
+            }
+            
             freeaddrinfo(res);
             close(fd);
             break;
