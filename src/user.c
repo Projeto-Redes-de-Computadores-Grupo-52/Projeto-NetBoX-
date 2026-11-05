@@ -388,7 +388,8 @@ int main(int argc, char *argv[]){
 
                 int filename_valido = 1;
                 int label_valido = 1;
-
+                
+                // verificando se os caracteres do filename antes do ponto são alfanuméricos ou são '-', '_'
                 for(int i = 0; i < strlen(filename) - 4; i++){
                     if(isalnum(filename[i]) == 0 && filename[i] != '-' && filename[i] != '_'){
                         filename_valido = 0;
@@ -396,6 +397,7 @@ int main(int argc, char *argv[]){
                     }
                 }
                 
+                // verificando se os caracteres do filename após do ponto (extension do ficheiro, o type) são alfanuméricos.
                 for(int i = strlen(filename) - 3; i < strlen(filename); i++){
                     if(isalnum(filename[i]) == 0){
                         filename_valido = 0;
@@ -403,6 +405,7 @@ int main(int argc, char *argv[]){
                     }
                 }
 
+                // verificando se os caracteres do label são alfanuméricos ou são '-', '_'
                 for(int i = 0; i < strlen(label); i++){
                     if(isalnum(label[i]) == 0 && label[i] != '-' && label[i] != '_'){
                         label_valido = 0;
