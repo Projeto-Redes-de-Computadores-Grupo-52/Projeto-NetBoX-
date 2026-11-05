@@ -6,6 +6,8 @@
 #include <string.h>      // memset()
 #include <sys/socket.h>   // socket(), sendto(), recvfrom(), bind()
 #include <sys/types.h>    // tipos usados por várias system calls de rede 
+#include <sys/stat.h>
+#include <ctype.h>
 
 
 // argc -> quantidade de argumentos (contando o nome do programa)
@@ -360,6 +362,122 @@ int main(int argc, char *argv[]){
                     } else {
                         printf("Resposta inesperada do servidor: %s\n", resposta);
                     }
+                }
+            }
+        }
+        else if(strcmp(comando, "publish") == 0){
+            if(its_loged == 0){
+                fprintf(stderr, "Erro: nenhum usuário está logado\n");
+            } else{
+                char filename[26];
+                char label[22];
+
+                int n = sscanf(linha, "%s %25s %21s", comando, filename, label);
+
+                if(n!= 3){
+                    fprintf(stderr, "Erro: comando publish precisa de filename e label\n");
+                }
+                // Também precisaremos saber se os valores digitados são nos intervalos 1-24 e 1-20 caracteres
+                // strlen devolve o comprimento em quanidade de caracteres que uma string tem.
+                else if (strlen(filename) > 24 || strlen(label) > 20){
+                    fprintf(stderr, "Erro: filename deve ter no máximo 24 caracteres e label no máximo 20 caracteres\n");
+                } 
+                else if (strlen(filename) < 5 || filename[strlen(filename) - 4] != '.'){
+                    fprintf(stderr, "Erro: filename inválido. Formato: nome.ext, até 24 caracteres; nome com letras, dígitos, '-' ou '_'; extensão com 3 letras ou dígitos.\n");
+                } else{
+
+                int filename_valido = 1;
+                int label_valido = 1;
+
+                for(int i = 0; i < strlen(filename) - 4; i++){
+                    if(isalnum(filename[i]) == 0 && filename[i] != '-' && filename[i] != '_'){
+                        filename_valido = 0;
+                        break;
+                    }
+                }
+                
+                for(int i = strlen(filename) - 3; i < strlen(filename); i++){
+                    if(isalnum(filename[i]) == 0){
+                        filename_valido = 0;
+                        break;
+                    }
+                }
+
+                for(int i = 0; i < strlen(label); i++){
+                    if(isalnum(label[i]) == 0 && label[i] != '-' && label[i] != '_'){
+                        label_valido = 0;
+                        break;
+                    }
+                }
+
+                if(filename_valido == 0){
+                    fprintf(stderr, "Erro: filename inválido. Formato: nome.ext, até 24 caracteres; nome com letras, dígitos, '-' ou '_'; extensão com 3 letras ou dígitos.\n");
+                } else if(label_valido == 0){
+                    fprintf(stderr, "Erro: label inválido. Formato: label, até 20 caracteres; nome com letras, dígitos, '-' ou '_'.\n");
+                } else{
+                    struct stat file_info;
+
+
+                    if (stat(filename, &file_info) == -1) {
+                        fprintf(stderr, "Erro: O ficheiro não existe ou o acesso ao ficheiro foi negado (Permission denied).\n");  
+                    } else{
+                        if(!S_ISREG(file_info.st_mode)){
+                            fprintf(stderr, "Erro: Este ficheiro não é um file que pode ser publicado (Ex. Diretório) .\n");
+                        } else if(file_info.st_size > 10000000){
+                            fprintf(stderr, "Erro: O tamanho de este ficheiro não pode ser supérior a 10,000,000 bytes.\n");
+                        } else{
+                            char mensagem[76];
+
+                            sprintf(mensagem, "PUB %s %s %s %lld %s\n", uid_loged, password_loged, filename, (long long) file_info.st_size, label);
+
+                            int bytes_enviados = sendto(sockfd, mensagem, strlen(mensagem), 0, (struct sockaddr *)&ds_addr, sizeof(ds_addr));
+
+                            if (bytes_enviados == -1) {
+                                fprintf(stderr, "Erro ao enviar mensagem para o DS\n");
+                            }
+
+                            char resposta[64];
+
+                            struct sockaddr_in from_addr;
+                            socklen_t from_len = sizeof(from_addr); 
+
+                            int bytes_recebidos = recvfrom(sockfd, resposta, sizeof(resposta) - 1, 0,(struct sockaddr *)&from_addr, &from_len);
+
+                            if (bytes_recebidos == -1){
+                                fprintf(stderr, "Erro ao receber a resposta do DS\n");
+                            } else{
+                                resposta[bytes_recebidos] = '\0';
+
+                                char tipo_resposta[20]; 
+                                char status[16]; 
+
+                                sscanf(resposta, "%s %s", tipo_resposta, status);
+
+                                if(strcmp(status, "OK") == 0){ // Caso publish efetuado com sucesso
+                                    printf("publish efetuado com sucesso!\n");
+                                }
+                                else if (strcmp(status, "NLG") == 0) { // Caso o usuário não esteja logado
+                                    printf("Erro: usuário não estava logado.\n");
+                                }
+
+                                else if (strcmp(status, "UNR") == 0) { // Caso o usuário não esteja registrado
+                                    printf("Erro: usuário não registrado.\n");
+                                }
+                                else if (strcmp(status, "WRP") == 0) { // Caso a senha seja incorreta
+                                    printf("Erro: senha incorreta.\n");
+                                } else if(strcmp(status, "NOK") == 0){
+                                    printf("Erro: O publish não foi efetuado com sucesso por causa de um erro.\n");
+                                }
+                                // Se status não bater com nenhum desses casos acima, entramos nesse else
+                                else {
+                                    printf("Resposta inesperada do servidor: %s\n", resposta);
+                                }
+                            }
+                        }
+
+                    }
+                }
+                
                 }
             }
         }
