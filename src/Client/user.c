@@ -49,7 +49,8 @@ void cmd_login(char *linha, char *comando, char *uid_logged, char *password_logg
     
         // Caso houve algum erro e nada foi enviado sendto() retorna -1
         if (bytes_enviados == -1) {
-        fprintf(stderr, "Erro ao enviar mensagem para o DS\n");
+            fprintf(stderr, "Erro ao enviar mensagem para o DS\n");
+            return; // Sai do cmd_login sem chegar ao rcvfrom
         }
     
         // Agora vamos para a resposta
@@ -70,8 +71,8 @@ void cmd_login(char *linha, char *comando, char *uid_logged, char *password_logg
     
         if (bytes_recebidos == -1){
             fprintf(stderr, "Erro ao receber a resposta do DS\n");
-        }else{
-    
+            return;
+        }
             resposta[bytes_recebidos] = '\0'; // Adiciona o byte terminador a resposta
     
             // Declaramos os dois arrays que vamos guardar as palavras que vamos extrair de resposta
@@ -101,13 +102,7 @@ void cmd_login(char *linha, char *comando, char *uid_logged, char *password_logg
             // Se status não bater com nenhum desses casos acima, entramos nesse else
             else {
                 printf("Resposta inesperada do servidor: %s\n", resposta);
-            }
-
-    
         }
-        
-    
-    
     }
 
 }
@@ -138,6 +133,8 @@ void cmd_logout(char *uid_logged, char *password_logged, int sockfd, struct sock
         // Caso houve algum erro e nada foi enviado sendto() retorna -1
         if (bytes_enviados == -1) {
         fprintf(stderr, "Erro ao enviar mensagem para o DS\n");
+        return; // Sai do cmd_logout sem chegar ao rcvfrom
+
         }
 
         // Agora vamos para a resposta
@@ -158,8 +155,8 @@ void cmd_logout(char *uid_logged, char *password_logged, int sockfd, struct sock
 
         if (bytes_recebidos == -1){
             fprintf(stderr, "Erro ao receber a resposta do DS\n");
-        }else{
-
+            return;
+        }
             resposta[bytes_recebidos] = '\0'; // Adiciona o byte terminador a resposta
 
             // Declaramos os dois arrays que vamos guardar as palavras que vamos extrair de resposta
@@ -187,9 +184,7 @@ void cmd_logout(char *uid_logged, char *password_logged, int sockfd, struct sock
             // Se status não bater com nenhum desses casos acima, entramos nesse else
             else {
                 printf("Resposta inesperada do servidor: %s\n", resposta);
-            }
-
-        }
+         }
     }
 }
 
@@ -207,6 +202,8 @@ void cmd_unregister(char *uid_logged, char *password_logged, int sockfd, struct 
         int bytes_enviados = sendto(sockfd, mensagem, strlen(mensagem), 0, (struct sockaddr *)ds_addr, sizeof(*ds_addr));
         if (bytes_enviados == -1) {
             fprintf(stderr, "Erro ao enviar mensagem para o DS\n");
+            return; // Sai do cmd_unregister sem chegar ao rcvfrom
+
         }
     
         char resposta[64];
@@ -217,7 +214,8 @@ void cmd_unregister(char *uid_logged, char *password_logged, int sockfd, struct 
     
         if (bytes_recebidos == -1) {
             fprintf(stderr, "Erro ao receber a resposta do DS\n");
-        } else {
+            return;
+        } 
             resposta[bytes_recebidos] = '\0';
     
             char tipo_resposta[20];
@@ -237,9 +235,85 @@ void cmd_unregister(char *uid_logged, char *password_logged, int sockfd, struct 
                 printf("Resposta inesperada do servidor: %s\n", resposta);
             }
         }
-    }
+    
 
 }
+
+void cmd_list(int sockfd, struct sockaddr_in *ds_addr){
+
+    char *mensagem = "LST\n";
+
+    int bytes_enviados = sendto(sockfd, mensagem, strlen(mensagem), 0, (struct sockaddr *)ds_addr, sizeof(*ds_addr));
+
+    if(bytes_enviados == -1){
+        fprintf(stderr, "Erro ao enviar a mensagem para o DS !\n");
+        return; // Sai do cmd_lst sem chegar ao rcvfrom
+    }
+
+    char resposta[1300]; // Aqui colocamos o tamnho da resposta como 1300 pois no pior caso podemos ter 50 filenames.
+
+    struct sockaddr_in from_addr;
+    socklen_t from_len = sizeof(from_addr);
+
+    int bytes_recebidos = recvfrom(sockfd, resposta, sizeof(resposta) - 1 , 0, (struct sockaddr *)&from_addr, &from_len);
+
+    if(bytes_recebidos == -1){
+
+        fprintf(stderr, "Erro ao receber a resposta do DS\n");
+        return;
+    }
+
+    resposta[bytes_recebidos] = '\0';
+
+    char *reply_type = strtok(resposta, " \n");
+
+    if(reply_type == NULL){
+        fprintf(stderr, "Resposta vazia do DS !\n");
+        return;
+    }
+
+    if(strcmp(reply_type, "RLS") != 0){ // Em caso de a resposta seja diferente de RLS que é o esperado, sendo igual o strcmp devolve 0
+        fprintf(stderr, "Resposta inesperada: %s\n", reply_type);
+        return;
+    }
+    
+    char *status = strtok(NULL, " \n");
+
+    if(status == NULL){
+        fprintf(stderr, "O servidor mandou uma resposta incompleta\n");
+        return;
+    }
+
+    if(strcmp(status, "NOK") == 0){
+        fprintf(stdout, "Não há ficheiros publicados ! \n");
+        return;
+    }
+
+    if(strcmp(status, "OK") != 0){ // Significa que o status é diferente de OK
+        fprintf(stderr, "Status diferente de OK: %s \n", status);
+        return;
+    }
+
+    // Vamos ao loop para imprimir os nomes dos files
+
+    char *nome = strtok(NULL, " \n");
+    if(nome == NULL){
+        fprintf(stdout, "Não foram recebidos nomes do DS \n");
+        return;
+    }
+        
+    int contador = 0;
+
+    while(nome != NULL){
+        contador ++;
+        fprintf(stdout, " %d.  %s\n", contador, nome);
+
+        nome = strtok(NULL, " \n");
+    }
+    fprintf(stdout, "%d ficheiros encontrados !\n", contador);
+}
+
+
 
 
 // Função que vai administrar os comandos do user recebe essas três variáveis
@@ -336,6 +410,10 @@ void user_interface (int sockfd, struct sockaddr_in *ds_addr, char *peerport){
                 
                 flag = 0; // Comando dado foi de exit então saimos do loop
             }
+        }else if(strcmp(comando, "list") == 0){
+
+            cmd_list(sockfd, ds_addr);
+
         }
         else{
             fprintf(stderr, "Comando desconhecido: %s\n", comando);
