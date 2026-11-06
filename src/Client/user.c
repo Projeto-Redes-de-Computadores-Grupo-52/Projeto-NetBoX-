@@ -21,7 +21,7 @@ void cmd_login(char *linha, char *comando, char *uid_logged, char *password_logg
     // No caso do enunciado precisamos ter certeza de que foram inseridas as três palavras
     
     if(n!= 3){
-        fprintf(stderr, "Erro; comando login precisa de UID e password\n");
+        fprintf(stderr, "Erro: comando login precisa de UID e password\n");
     }
     // Também precisaremos saber se os valores digitados são de exatamente 6 e 8 caracteres
     // strlen devolve o comprimento em quanidade de caracteres que uma string tem.
@@ -313,6 +313,173 @@ void cmd_list(int sockfd, struct sockaddr_in *ds_addr){
     fprintf(stdout, "%d ficheiros encontrados !\n", contador);
 }
 
+void cmd_versions(char *linha, char *comando, struct sockaddr_in *ds_addr){
+
+    char filename[26];
+
+    int n = sscanf(linha, "%29s %25s", comando, filename);
+
+    if(n != 2){
+        fprintf(stderr, "Erro: Comando versions precisa do filename !\n");
+        return;
+    }
+
+    else if (strlen(filename) > 24){
+    
+        fprintf(stderr, "Erro: filename tem que ter no máximo 24 caracteres\n");
+        return;
+
+    } 
+
+    int tcp_sockfd = socket(AF_INET, SOCK_STREAM, 0); // Para a conexão TCP mudamos o tipo de argumento do socket.
+
+    // Verificação se houve erro na criação do socket.
+    if(tcp_sockfd == -1){
+        fprintf(stderr, "Erro ao criar socket\n");
+        return;
+    }
+
+    int ret_connect = connect(tcp_sockfd, (struct sockaddr *)ds_addr, sizeof(*ds_addr));
+
+    if(ret_connect == -1){ // Em caso de erro o connect devolve -1
+        fprintf(stderr, "Erro a conectar-se com o servido !\n");
+        close(tcp_sockfd); // Fecha o socket
+        return;
+    }
+
+    // Enviar a mensagem para o servidor
+    char mensagem[64];
+    int tamanho_mensagem = sprintf(mensagem, "VRS %s\n", filename); 
+
+    int acumulado = 0;
+    while(tamanho_mensagem > acumulado){
+
+        ssize_t return_write = write(tcp_sockfd,mensagem + acumulado, tamanho_mensagem - acumulado);
+
+        if(return_write == -1){
+            fprintf(stderr, "Erro no envio da mensagem para o servidor ! \n");
+            close(tcp_sockfd);
+            return;
+        }
+
+        acumulado = acumulado + return_write;
+        
+    }
+
+    // Leitura da resposta
+
+    char resposta[4000];
+    int total_lido = 0;
+
+    // Loop de leitura
+    while(1){
+
+        if((sizeof(resposta) - total_lido - 1) == 0){
+            fprintf(stderr, "A mensagem recebida pelo servidor é maior que o buffer da resposta (4000 bytes) !\n");
+            close(tcp_sockfd);
+            return;
+        }
+
+        ssize_t return_read = read(tcp_sockfd, resposta + total_lido, sizeof(resposta)- total_lido - 1);
+
+        if(return_read == -1){
+            fprintf(stderr, "Erro na leitura da resposta do servidor !\n");
+            close(tcp_sockfd);
+            return;
+        }
+
+        if(return_read == 0){ // O DS fechou a ligação antes de mandar o \n
+            fprintf(stderr, "Erro: O DS fechou a ligação inesperadamente !\n");
+            close(tcp_sockfd);
+            return;
+        }
+
+        total_lido = total_lido + return_read;
+
+        resposta[total_lido] = '\0'; // Adiciona o byte terminador a resposta
+
+        if(strchr(resposta, '\n') != NULL){ // Em caso de já termos lido a mensagem toda saimos do loop
+            break;
+        }
+    }
+
+    close(tcp_sockfd);
+
+    char *reply_type = strtok(resposta, " \n");
+
+    if(reply_type == NULL){
+        fprintf(stderr, "Resposta vazia do DS !\n");
+        return;
+    }
+
+     if(strcmp(reply_type, "RVR") != 0){ // Em caso de a resposta seja diferente de RVR que é o esperado, sendo igual o strcmp devolve 0
+        fprintf(stderr, "Resposta inesperada: %s\n", reply_type);
+        return;
+    }
+    
+    char *status = strtok(NULL, " \n");
+
+    if(status == NULL){
+        fprintf(stderr, "O servidor mandou uma resposta incompleta\n");
+        return;
+    }
+
+    if(strcmp(status, "NOK") == 0){
+        fprintf(stdout, "Nenhum utilizador tem esse ficheiro disponível ! \n");
+        return;
+    }
+
+    if(strcmp(status, "ERR") == 0){
+        fprintf(stderr, "o ficheiro informado está incorreto, por favor conferir o nome e extensão do ficheiro ! \n");
+        return;
+    }
+
+    if(strcmp(status, "OK") != 0){ // Significa que o status é diferente de OK
+        fprintf(stderr, "Status diferente de OK: %s \n", status);
+        return;
+    }
+
+    char *uid = strtok(NULL, " \n");
+
+    if(uid == NULL){
+        fprintf(stdout, "Não foram recebidos campos (peer) do DS \n");
+        return;
+    }
+
+    int contador = 0;
+
+    while(uid != NULL){
+        contador ++;
+
+        char *tamanho = strtok(NULL, " \n");
+
+        char *label = strtok(NULL, " \n");
+
+        char *data = strtok(NULL, " \n");
+
+        char *disponibilidade = strtok(NULL, " \n");
+
+
+        // Verificamos se alguma das informações faltaram
+        if(tamanho == NULL || label == NULL || data == NULL || disponibilidade == NULL){
+            fprintf(stderr, "Informação incompleta para o utilizador: %s !\n", uid);
+            return;
+        }
+
+        fprintf(stdout, "%d. Utilizador: %s\n", contador, uid);
+
+        fprintf(stdout, " Tamanho: %s bytes\n", tamanho);
+        fprintf(stdout, " Label: %s\n", label);
+        fprintf(stdout, " Data: %s\n", data);
+        fprintf(stdout, " Disponibilidade: %s\n", disponibilidade);
+        
+        fprintf(stdout, "\n");
+
+        uid = strtok(NULL, " \n");
+    }
+    
+
+}
 
 
 
@@ -413,6 +580,10 @@ void user_interface (int sockfd, struct sockaddr_in *ds_addr, char *peerport){
         }else if(strcmp(comando, "list") == 0){
 
             cmd_list(sockfd, ds_addr);
+
+        }else if(strcmp(comando, "versions") == 0){
+
+            cmd_versions(linha, comando, ds_addr);
 
         }
         else{
