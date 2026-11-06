@@ -101,7 +101,12 @@ int main(int argc, char *argv[]) {
         }
 
         else if (!strcmp(cmd, "publish")) {
-            // TODO
+            if (sscanf(buffer, "%*s %s %s %s", arg1, arg2, extra) != 2)
+                printf("Usage: publish filename label\n");
+            else if (strlen(uid) == 0)
+                printf("User not logged in.\n");
+            else
+                publish(uid, password, arg1, arg2, fd, res);
         }
 
         else if (!strcmp(cmd, "remove")) {

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <netdb.h>
+#include <sys/stat.h>
 
 #include "common/config.h"
 #include "common/validation.h"
@@ -177,6 +178,56 @@ int remove_resource(const char *uid, const char *password, const char *filename,
 
     if (!strcmp(status, "OK")) { printf("Resource removed successfully.\n"); return 0; }
     if (!strcmp(status, "NOK")) printf("Resource not found (not published by you).\n");
+    else if (!strcmp(status, "NLG")) printf("User not logged in.\n");
+    else if (!strcmp(status, "UNR")) printf("User not registered.\n");
+    else if (!strcmp(status, "WRP")) printf("Wrong password.\n");
+    else if (!strcmp(status, "ERR")) printf("Error.\n");
+    else printf("Unexpected reply from DS.\n");
+
+    return 1;
+}
+
+int publish(const char *uid, const char *password, const char *filename, const char *label, int fd, struct addrinfo *res) {
+
+    char message[BUF_SIZE+1];
+    const char *status;
+    struct stat st;
+
+    if (!check_filename(filename)) {
+        printf("Invalid filename.\n");
+        return 1;
+    }
+    if (!check_label(label)) {
+        printf("Invalid label (1-20 characters: letters, digits, - and _).\n");
+        return 1;
+    }
+
+    if (stat(filename, &st) == -1 || !S_ISREG(st.st_mode)) {
+        printf("File '%s' not found in the local directory.\n", filename);
+        return 1;
+    }
+    if (st.st_size > FSIZE_MAX) {
+        printf("File too large (maximum %d bytes).\n", FSIZE_MAX);
+        return 1;
+    }
+
+    snprintf(message, sizeof(message), "PUB %s %s %s %ld %s\n",
+             uid, password, filename, (long)st.st_size, label);
+
+    if (communicate(fd, message, res)) {
+        printf("Error: communicate()\n");
+        return 1;
+    }
+
+    /* RPB OK / RPB NOK / RPB NLG / RPB UNR / RPB WRP / RPB ERR */
+    status = reply_status(message, "RPB");
+    if (status == NULL) {
+        printf("Unexpected reply from DS.\n");
+        return 1;
+    }
+
+    if (!strcmp(status, "OK")) { printf("Resource published successfully.\n"); return 0; }
+    if (!strcmp(status, "NOK")) printf("Unsuccessful publication.\n");
     else if (!strcmp(status, "NLG")) printf("User not logged in.\n");
     else if (!strcmp(status, "UNR")) printf("User not registered.\n");
     else if (!strcmp(status, "WRP")) printf("Wrong password.\n");

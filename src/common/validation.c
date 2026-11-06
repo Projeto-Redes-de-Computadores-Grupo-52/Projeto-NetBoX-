@@ -39,3 +39,16 @@ int check_filename(const char *filename) {
 
     return 1;
 }
+
+int check_label(const char *label) {
+    size_t len = strlen(label);
+
+    if (len < 1 || len > LABEL_MAX_LEN) return 0;
+
+    for (size_t i = 0; i < len; i++)
+        if (!isalnum((unsigned char)label[i])
+            && label[i] != '-' && label[i] != '_')
+            return 0;
+
+    return 1;
+}

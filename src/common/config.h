@@ -12,6 +12,9 @@
 
 #define UID_SIZE 6
 #define PWD_SIZE 8
+
 #define FILENAME_MAX_LEN 24
+#define LABEL_MAX_LEN 20
+#define FSIZE_MAX 10000000
 
 #endif
