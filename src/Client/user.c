@@ -606,7 +606,85 @@ void cmd_publish(char *linha, char *comando, char *uid_logged, char *password_lo
 
 }
 
+void cmd_remove(char *linha, char *comando, char *uid_logged, char *password_logged, int sockfd, struct sockaddr_in *ds_addr, int *its_logged){
 
+    // Verifica se há sessão iniciada
+    if(*its_logged == 0){
+        fprintf(stderr, "Erro: nenhum usuário está logado\n");
+        return;
+    }
+
+    // Lê o filename (buffer de 26 e largura 25 para detetar nomes com mais de 24)
+    char filename[26];
+
+    int n = sscanf(linha, "%29s %25s", comando, filename);
+
+    if(n != 2){
+        fprintf(stderr, "Erro: comando remove precisa do filename\n");
+        return;
+    }
+
+    if(strlen(filename) > 24){
+        fprintf(stderr, "Erro: filename tem que ter no máximo 24 caracteres\n");
+        return;
+    }
+
+    // Monta a mensagem REM UID password filename
+    char mensagem[64];
+    snprintf(mensagem, sizeof(mensagem), "REM %s %s %s\n", uid_logged, password_logged, filename);
+
+    int bytes_enviados = sendto(sockfd, mensagem, strlen(mensagem), 0, (struct sockaddr *)ds_addr, sizeof(*ds_addr));
+
+    if(bytes_enviados == -1){
+        fprintf(stderr, "Erro ao enviar mensagem para o DS\n");
+        return; // Sai sem chegar ao recvfrom
+    }
+
+    // Recebe a resposta RRM
+    char resposta[64];
+    struct sockaddr_in from_addr;
+    socklen_t from_len = sizeof(from_addr);
+
+    int bytes_recebidos = recvfrom(sockfd, resposta, sizeof(resposta) - 1, 0, (struct sockaddr *)&from_addr, &from_len);
+
+    if(bytes_recebidos == -1){
+        fprintf(stderr, "Erro ao receber a resposta do DS\n");
+        return;
+    }
+
+    resposta[bytes_recebidos] = '\0';
+
+    char tipo_resposta[20];
+    char status[16];
+
+    if(sscanf(resposta, "%19s %15s", tipo_resposta, status) != 2 || strcmp(tipo_resposta, "RRM") != 0){
+        fprintf(stderr, "Resposta inesperada do servidor: %s\n", resposta);
+        return;
+    }
+
+    // Trata os estados possíveis do RRM
+    if(strcmp(status, "OK") == 0){
+        printf("Ficheiro removido com sucesso!\n");
+    }
+    else if(strcmp(status, "NOK") == 0){
+        printf("Erro: o ficheiro não foi publicado por este utilizador.\n");
+    }
+    else if(strcmp(status, "NLG") == 0){
+        printf("Erro: usuário não estava logado.\n");
+    }
+    else if(strcmp(status, "UNR") == 0){
+        printf("Erro: usuário não registrado.\n");
+    }
+    else if(strcmp(status, "WRP") == 0){
+        printf("Erro: senha incorreta.\n");
+    }
+    else if(strcmp(status, "ERR") == 0){
+        printf("Erro: pedido inválido, verifique o nome do ficheiro.\n");
+    }
+    else{
+        printf("Resposta inesperada do servidor: %s\n", resposta);
+    }
+}
 // Função que vai administrar os comandos do user recebe essas três variáveis
 // sockfd -> File descriptor do socket UDP usado para falar com o DS (Directory Server)
 // ds_addr -> Ponteiro para a struct com o endereço (IP + Porta) do DS (Directory Server)
@@ -710,8 +788,14 @@ void user_interface (int sockfd, struct sockaddr_in *ds_addr, char *peerport){
             cmd_versions(linha, comando, ds_addr);
 
         }else if(strcmp(comando, "publish") == 0){
+
             cmd_publish(linha, comando, uid_logged, password_logged, sockfd, ds_addr, &its_logged);
+            
         }
+        else if(strcmp(comando, "remove") == 0){
+            cmd_remove(linha, comando, uid_logged, password_logged, sockfd, ds_addr, &its_logged);
+        }
+
         else{
             fprintf(stderr, "Comando desconhecido: %s\n", comando);
         }
