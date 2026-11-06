@@ -17,4 +17,6 @@
 #define LABEL_MAX_LEN 20
 #define FSIZE_MAX 10000000
 
+#define VERSIONS_BUF 16384
+
 #endif

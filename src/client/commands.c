@@ -7,6 +7,7 @@
 #include "common/validation.h"
 #include "client/network/udp_client.h"
 #include "client/commands.h"
+#include "client/network/tcp_client.h"
 
 static const char *reply_status(const char *message, const char *code) {
     size_t n = strlen(code);
@@ -235,4 +236,75 @@ int publish(const char *uid, const char *password, const char *filename, const c
     else printf("Unexpected reply from DS.\n");
 
     return 1;
+}
+
+int versions(const char *filename, const char *ip, const char *port) {
+
+    char request[BUF_SIZE+1];
+    char reply[VERSIONS_BUF];
+    const char *status;
+
+    if (!check_filename(filename)) {
+        printf("Invalid filename.\n");
+        return 1;
+    }
+
+    snprintf(request, sizeof(request), "VRS %s\n", filename);
+
+    if (tcp_request(ip, port, request, reply, sizeof(reply))) {
+        printf("Error: could not get a reply from the DS (TCP).\n");
+        return 1;
+    }
+
+    /* RVR NOK / RVR OK UID Fsize label time AVL|NAV ... / RVR ERR */
+    status = reply_status(reply, "RVR");
+    if (status == NULL) {
+        printf("Unexpected reply from DS.\n");
+        return 1;
+    }
+
+    if (!strcmp(status, "NOK")) {
+        printf("No peers publishing '%s'.\n", filename);
+        return 0;
+    }
+    if (!strcmp(status, "ERR")) {
+        printf("Error.\n");
+        return 1;
+    }
+    if (strncmp(status, "OK ", 3) != 0) {
+        printf("Unexpected reply from DS.\n");
+        return 1;
+    }
+
+    char *uid = strtok((char *)status + 3, " ");
+
+    printf("%-8s %-10s %-20s %-22s %s\n", "UID", "Size", "Label", "Published", "Status");
+
+    while (uid != NULL) {
+        char *size  = strtok(NULL, " ");
+        char *label = strtok(NULL, " ");
+        char *avail = NULL, *t;
+        char when[64] = "";
+
+        /* publication_time: tudo até AVL/NAV */
+        while ((t = strtok(NULL, " ")) != NULL) {
+            if (!strcmp(t, "AVL") || !strcmp(t, "NAV")) { avail = t; break; }
+            if (strlen(when) + strlen(t) + 2 < sizeof(when)) {
+                if (when[0] != '\0') strcat(when, " ");
+                strcat(when, t);
+            }
+        }
+
+        if (size == NULL || label == NULL || avail == NULL) {
+            printf("Malformed reply from DS.\n");
+            return 1;
+        }
+
+        printf("%-8s %-10s %-20s %-22s %s\n", uid, size, label, when,
+               !strcmp(avail, "AVL") ? "Online" : "Offline");
+
+        uid = strtok(NULL, " ");
+    }
+
+    return 0;
 }

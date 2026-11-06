@@ -123,7 +123,10 @@ int main(int argc, char *argv[]) {
         }
 
         else if (!strcmp(cmd, "versions")) {
-            // TODO
+            if (sscanf(buffer, "%*s %s %s", arg1, extra) != 1)
+                printf("Usage: versions filename\n");
+            else
+                versions(arg1, ip, port_s);
         }
 
         else if (!strcmp(cmd, "exit")) {
