@@ -9,9 +9,10 @@
 #include "client/commands.h"
 #include "client/network/tcp_client.h"
 
+// this function returns a pointer to the reply status after the reply code
 static const char *reply_status(const char *message, const char *code) {
     size_t n = strlen(code);
-
+    // code doesn't match or doesn't have a space after, return NULL
     if (strncmp(message, code, n) != 0 || message[n] != ' ') return NULL;
     return message + n + 1;
 }
@@ -30,10 +31,11 @@ int login(const char *uid, const char *password, const char *peerport, int fd, s
         return 1;
     }
 
+    // LIN UID password peerTCPport
     snprintf(message, sizeof(message), "LIN %s %s %s\n", uid, password, peerport);
 
-    if (communicate(fd, message, res)) {
-        printf("Error: communicate()\n");
+    if (udp_communicate(fd, message, res)) {
+        printf("Error: udp_communicate()\n");
         return 1;
     }
 
@@ -58,9 +60,10 @@ int unregister(const char *uid, const char *password, int fd, struct addrinfo *r
     char message[BUF_SIZE+1];
     const char *status;
 
+    // UNR UID password
     snprintf(message, sizeof(message), "UNR %s %s\n", uid, password);
 
-    if (communicate(fd, message, res)) {
+    if (udp_communicate(fd, message, res)) {
         printf("Error: communicate()\n");
         return 1;
     }
@@ -87,10 +90,11 @@ int logout(const char *uid, const char *password, int fd, struct addrinfo *res) 
     char message[BUF_SIZE+1];
     const char *status;
 
+    // LOU UID password
     snprintf(message, sizeof(message), "LOU %s %s\n", uid, password);
 
-    if (communicate(fd, message, res)) {
-        printf("Error: communicate()\n");
+    if (udp_communicate(fd, message, res)) {
+        printf("Error: udp_communicate()\n");
         return 1;
     }
 
@@ -118,8 +122,8 @@ int list(int fd, struct addrinfo *res) {
 
     snprintf(message, sizeof(message), "LST\n");
 
-    if (communicate(fd, message, res)) {
-        printf("Error: communicate()\n");
+    if (udp_communicate(fd, message, res)) {
+        printf("Error: udp_communicate()\n");
         return 1;
     }
 
@@ -165,8 +169,8 @@ int remove_resource(const char *uid, const char *password, const char *filename,
 
     snprintf(message, sizeof(message), "REM %s %s %s\n", uid, password, filename);
 
-    if (communicate(fd, message, res)) {
-        printf("Error: communicate()\n");
+    if (udp_communicate(fd, message, res)) {
+        printf("Error: udp_communicate()\n");
         return 1;
     }
 
@@ -192,8 +196,9 @@ int publish(const char *uid, const char *password, const char *filename, const c
 
     char message[BUF_SIZE+1];
     const char *status;
-    struct stat st;
+    struct stat st; // file attributes
 
+    // validation.c - check filename and label
     if (!check_filename(filename)) {
         printf("Invalid filename.\n");
         return 1;
@@ -204,7 +209,7 @@ int publish(const char *uid, const char *password, const char *filename, const c
     }
 
     if (stat(filename, &st) == -1 || !S_ISREG(st.st_mode)) {
-        printf("File '%s' not found in the local directory.\n", filename);
+        printf("File '%s' not found in the local directory. May not be a regular file.\n", filename);
         return 1;
     }
     if (st.st_size > FSIZE_MAX) {
@@ -212,11 +217,12 @@ int publish(const char *uid, const char *password, const char *filename, const c
         return 1;
     }
 
+    // PUB UID password filename Fsize label
     snprintf(message, sizeof(message), "PUB %s %s %s %ld %s\n",
              uid, password, filename, (long)st.st_size, label);
 
-    if (communicate(fd, message, res)) {
-        printf("Error: communicate()\n");
+    if (udp_communicate(fd, message, res)) {
+        printf("Error: udp_communicate()\n");
         return 1;
     }
 
@@ -240,7 +246,7 @@ int publish(const char *uid, const char *password, const char *filename, const c
 
 int versions(const char *filename, const char *ip, const char *port) {
 
-    char request[BUF_SIZE+1];
+    char message[BUF_SIZE+1];
     char reply[VERSIONS_BUF];
     const char *status;
 
@@ -249,14 +255,15 @@ int versions(const char *filename, const char *ip, const char *port) {
         return 1;
     }
 
-    snprintf(request, sizeof(request), "VRS %s\n", filename);
+    // VRS filename
+    snprintf(message, sizeof(message), "VRS %s\n", filename);
 
-    if (tcp_request(ip, port, request, reply, sizeof(reply))) {
+    if (tcp_request(ip, port, message, reply, sizeof(reply))) {
         printf("Error: could not get a reply from the DS (TCP).\n");
         return 1;
     }
 
-    /* RVR NOK / RVR OK UID Fsize label time AVL|NAV ... / RVR ERR */
+    /* RVR NOK / RVR OK [UID Fsize label publication_time availability]* / RVR ERR */
     status = reply_status(reply, "RVR");
     if (status == NULL) {
         printf("Unexpected reply from DS.\n");
@@ -271,27 +278,28 @@ int versions(const char *filename, const char *ip, const char *port) {
         printf("Error.\n");
         return 1;
     }
-    if (strncmp(status, "OK ", 3) != 0) {
+    if (strncmp(status, "OK ", 3) != 0) { // reply status is OK, but not in the right format
         printf("Unexpected reply from DS.\n");
         return 1;
     }
 
-    char *uid = strtok((char *)status + 3, " ");
+    char *file_info = strtok((char *)status + 3, " "); // file DS info, starting at publisher UID 
 
+    // HEADER - %-8s alines the string to the right, minimum 8 characters
     printf("%-8s %-10s %-20s %-22s %s\n", "UID", "Size", "Label", "Published", "Status");
 
-    while (uid != NULL) {
+    while (file_info != NULL) {
         char *size  = strtok(NULL, " ");
         char *label = strtok(NULL, " ");
         char *avail = NULL, *t;
-        char when[64] = "";
+        char time[64] = "";
 
-        /* publication_time: tudo até AVL/NAV */
+        // don't know how many tokens correspond to the publication_time, catch all
         while ((t = strtok(NULL, " ")) != NULL) {
             if (!strcmp(t, "AVL") || !strcmp(t, "NAV")) { avail = t; break; }
-            if (strlen(when) + strlen(t) + 2 < sizeof(when)) {
-                if (when[0] != '\0') strcat(when, " ");
-                strcat(when, t);
+            if (strlen(time) + strlen(t) + 2 < sizeof(time)) { // check if the time tokens aren't too long
+                if (time[0] != '\0') strcat(time, " "); // add time token to string time, ' ' as the separator
+                strcat(time, t);
             }
         }
 
@@ -300,10 +308,10 @@ int versions(const char *filename, const char *ip, const char *port) {
             return 1;
         }
 
-        printf("%-8s %-10s %-20s %-22s %s\n", uid, size, label, when,
+        printf("%-8s %-10s %-20s %-22s %s\n", file_info, size, label, time,
                !strcmp(avail, "AVL") ? "Online" : "Offline");
 
-        uid = strtok(NULL, " ");
+        file_info = strtok(NULL, " "); // next file
     }
 
     return 0;
