@@ -244,6 +244,17 @@ int publish(const char *uid, const char *password, const char *filename, const c
     return 1;
 }
 
+// Converts "20261123-174721" into "23-11-2026 17:47:21"
+// If the input does not match the format, copy it unchanged
+static void format_time(const char *raw, char *out, size_t out_size) {
+    int y, mo, d, h, mi, s;
+
+    if (sscanf(raw, "%4d%2d%2d-%2d%2d%2d", &y, &mo, &d, &h, &mi, &s) == 6)
+        snprintf(out, out_size, "%02d-%02d-%04d %02d:%02d:%02d", d, mo, y, h, mi, s);
+    else
+        snprintf(out, out_size, "%s", raw);
+}
+
 int versions(const char *filename, const char *ip, const char *port) {
 
     char message[BUF_SIZE+1];
@@ -291,24 +302,18 @@ int versions(const char *filename, const char *ip, const char *port) {
     while (file_info != NULL) {
         char *size  = strtok(NULL, " ");
         char *label = strtok(NULL, " ");
-        char *avail = NULL, *t;
-        char time[64] = "";
-
-        // don't know how many tokens correspond to the publication_time, catch all
-        while ((t = strtok(NULL, " ")) != NULL) {
-            if (!strcmp(t, "AVL") || !strcmp(t, "NAV")) { avail = t; break; }
-            if (strlen(time) + strlen(t) + 2 < sizeof(time)) { // check if the time tokens aren't too long
-                if (time[0] != '\0') strcat(time, " "); // add time token to string time, ' ' as the separator
-                strcat(time, t);
-            }
-        }
+        char *raw_time = strtok(NULL, " ");
+        char *avail = strtok(NULL, " ");
+        char f_time[32];
 
         if (size == NULL || label == NULL || avail == NULL) {
             printf("Malformed reply from DS.\n");
             return 1;
         }
 
-        printf("%-8s %-10s %-20s %-22s %s\n", file_info, size, label, time,
+        format_time(raw_time, f_time, sizeof(f_time));
+
+        printf("%-8s %-10s %-20s %-22s %s\n", file_info, size, label, f_time,
                !strcmp(avail, "AVL") ? "Online" : "Offline");
 
         file_info = strtok(NULL, " "); // next file

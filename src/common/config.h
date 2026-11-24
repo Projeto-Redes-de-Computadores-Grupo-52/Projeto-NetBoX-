@@ -19,4 +19,8 @@
 
 #define VERSIONS_BUF 16384
 
+#define UDP_TIMEOUT_SEC 5
+#define UDP_MAX_TRIES 3
+#define TCP_TIMEOUT_SEC 5
+
 #endif

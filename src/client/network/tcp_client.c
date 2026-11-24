@@ -3,8 +3,11 @@
 #include <sys/types.h>
 #include <sys/socket.h> // socket, connect
 #include <netdb.h> // getaddrinfo, struct addrinfo
+#include <errno.h>
+#include <sys/time.h>
 
 #include "client/network/tcp_client.h"
+#include "common/config.h"
 
 int tcp_request(const char *ip, const char *port, const char *request,
                 char *reply, size_t reply_size) {
@@ -28,6 +31,16 @@ int tcp_request(const char *ip, const char *port, const char *request,
         return 1;
     }
 
+    struct timeval tv;
+    tv.tv_sec = TCP_TIMEOUT_SEC; 
+    tv.tv_usec = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1
+        || setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == -1) {
+        close(fd);
+        freeaddrinfo(res);
+        return 1;
+    }
+
     // CONNECT() - TCP handshake
     if (connect(fd, res->ai_addr, res->ai_addrlen) == -1) {
         close(fd);
@@ -36,34 +49,42 @@ int tcp_request(const char *ip, const char *port, const char *request,
     }
     freeaddrinfo(res); // we don't need it once connected
 
-    // loop so we make sure we send everything
+    // WRITE - loop so we make sure we send everything
     while (sent < len) {
         ssize_t n = write(fd, request + sent, len - sent);
-        if (n <= 0) {
-            close(fd); // free addr + EINTR
+        if (n < 0) {
+            if (errno == EINTR) continue; // signal interruption, just try again
+            close(fd);
+            return 1;
+        }
+        if (n == 0) { // free addr + EINTR
+            close(fd);
             return 1;
         }
         sent += (size_t)n;
     }
 
-    // loop until we find 'n' in the reply or the DS ends the connection
+    // READ - loop until we find '\n' in the reply or the DS ends the connection
     while (total < reply_size - 1) {
         ssize_t n = read(fd, reply + total, reply_size - 1 - total);
         if (n < 0) {
-            close(fd);
+            if (errno == EINTR) continue;
+            close(fd); // real error or timeout
             return 1;
         }
-        if (n == 0) break;
+        if (n == 0) break; // connection closed by DS
         total += (size_t)n;
-        if (reply[total-1] == '\n') break;
+        if (reply[total-1] == '\n') break; // complete reply received
     }
     close(fd);
 
     if (total == 0) return 1; // nothing received
+
+    // buffer full or connection closed early
+    if (reply[total-1] != '\n') return 1;
     
     // remove '\n' from the reply
-    if (reply[total-1] == '\n') total--; 
-    reply[total] = '\0';
+    reply[--total] = '\0';
 
     return 0;
 }

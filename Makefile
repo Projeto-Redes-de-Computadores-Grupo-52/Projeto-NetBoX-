@@ -9,4 +9,4 @@ debug: CFLAGS += -g -O0 -fsanitize=address,undefined
 debug: clean user
 
 clean:
-	rm -f user
+	rm -f user *.txt
