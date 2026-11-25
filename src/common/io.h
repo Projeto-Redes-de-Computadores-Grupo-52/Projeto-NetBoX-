@@ -10,7 +10,7 @@
 #ifndef IO_H
 #define IO_H
 
-#include <stddef.h>     // size_t, ssize_t
+#include <stddef.h> // size_t, ssize_t
 
 /**
  * @brief Writes exactly len bytes (loops on partial writes and EINTR).

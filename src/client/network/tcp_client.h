@@ -20,7 +20,6 @@
  */
 int tcp_connect(const char *ip, const char *port);
 
-/** (tcp_request mantém-se como está) */
 int tcp_request(const char *ip, const char *port, const char *request,
                 char *reply, size_t reply_size);
 

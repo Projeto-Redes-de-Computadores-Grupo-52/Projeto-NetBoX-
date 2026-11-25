@@ -41,6 +41,112 @@ static int parse_port(const char *s) {
     return (int)v;
 }
 
+// Everything the commands share
+typedef struct {
+    int fd;                         // UDP socket
+    struct addrinfo *res;           // resolved DS address
+    const char *ip, *port;          // DS address (also used for TCP)
+    const char *peerport;           // -m
+    char uid[UID_SIZE+1];           // empty = nobody logged in
+    char password[PWD_SIZE+1];
+} Ctx;
+
+static int logged_in(const Ctx *c) { return c->uid[0] != '\0'; }
+
+static void clear_session(Ctx *c) { c->uid[0] = c->password[0] = '\0'; }
+
+// Each handler receives the full line; returns 1 only if the app must quit.
+static int cmd_login(Ctx *c, const char *line) {
+    char a1[BUF_SIZE+1], a2[BUF_SIZE+1], extra[BUF_SIZE+1];
+
+    if (logged_in(c))
+        printf("Already logged in as %s. Use logout first.\n", c->uid);
+    else if (sscanf(line, "%*s %s %s %s", a1, a2, extra) != 2)
+        printf("Usage: login UID password\n");
+    else if (login(a1, a2, c->peerport, c->fd, c->res) == 0) {
+        strcpy(c->uid, a1); // already validated
+        strcpy(c->password, a2);
+    }
+    return 0;
+}
+
+static int cmd_logout(Ctx *c, const char *line) {
+    (void)line;
+    if (!logged_in(c)) printf("User not logged in.\n");
+    else if (logout(c->uid, c->password, c->fd, c->res) == 0) clear_session(c);
+    return 0;
+}
+
+static int cmd_unregister(Ctx *c, const char *line) {
+    (void)line;
+    if (!logged_in(c)) printf("User not logged in.\n");
+    else if (unregister(c->uid, c->password, c->fd, c->res) == 0) clear_session(c);
+    return 0;
+}
+
+static int cmd_publish(Ctx *c, const char *line) {
+    char a1[BUF_SIZE+1], a2[BUF_SIZE+1], extra[BUF_SIZE+1];
+
+    if (sscanf(line, "%*s %s %s %s", a1, a2, extra) != 2) printf("Usage: publish filename label\n");
+    else if (!logged_in(c)) printf("User not logged in.\n");
+    else publish(c->uid, c->password, a1, a2, c->fd, c->res);
+    return 0;
+}
+
+static int cmd_remove(Ctx *c, const char *line) {
+    char a1[BUF_SIZE+1], extra[BUF_SIZE+1];
+
+    if (sscanf(line, "%*s %s %s", a1, extra) != 1) printf("Usage: remove filename\n");
+    else if (!logged_in(c)) printf("User not logged in.\n");
+    else remove_resource(c->uid, c->password, a1, c->fd, c->res);
+    return 0;
+}
+
+static int cmd_list(Ctx *c, const char *line) {
+    (void)line;
+    list(c->fd, c->res);
+    return 0;
+}
+
+static int cmd_versions(Ctx *c, const char *line) {
+    char a1[BUF_SIZE+1], extra[BUF_SIZE+1];
+
+    if (sscanf(line, "%*s %s %s", a1, extra) != 1) printf("Usage: versions filename\n");
+    else versions(a1, c->ip, c->port);
+    return 0;
+}
+
+static int cmd_exit(Ctx *c, const char *line) {
+    (void)line;
+    if (logged_in(c)) { printf("Please logout first.\n"); return 0; }
+    return 1;   // quit
+}
+
+// Command table: exact name match (so "logoutxyz" is not "logout")
+static const struct {
+    const char *name; // command name
+    int (*fn)(Ctx *, const char *); // pointer to command handler
+} COMMANDS[] = {
+    {"login", cmd_login},
+    {"logout", cmd_logout},
+    {"unregister", cmd_unregister},
+    {"publish", cmd_publish},
+    {"remove", cmd_remove},
+    {"list", cmd_list},
+    {"versions", cmd_versions},
+    {"exit", cmd_exit},
+};
+
+// Returns 1 if the application must quit.
+static int run_command(Ctx *c, const char *cmd, const char *line) {
+    // sizeof(COMMANDS) / sizeof(COMMANDS[0]) = # commands
+    for (size_t i = 0; i < sizeof(COMMANDS) / sizeof(COMMANDS[0]); i++)
+        if (!strcmp(cmd, COMMANDS[i].name)) return COMMANDS[i].fn(c, line);
+
+    printf("No such command.\n");
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
 
     int fd; // UDP socket
@@ -48,12 +154,6 @@ int main(int argc, char *argv[]) {
 
     char buffer[BUF_SIZE+1]; // full line given by user
     char cmd[BUF_SIZE+1]; // command, the first word in the line
-    char arg1[BUF_SIZE+1], arg2[BUF_SIZE+1]; // first and second command argument
-    char extra[BUF_SIZE+1]; // extra arguments, if necessary
-
-    // empty UID ("") means no user is logged in
-    char uid[BUF_SIZE+1] = "";
-    char password[BUF_SIZE+1] = "";
 
     const char *peerport_s = NULL; // (-m)
     const char *ip = DSIP_1; // (-n)
@@ -106,99 +206,33 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // structure with app state (socket, UID, password...)
+    Ctx ctx = { .ip = ip, .port = port_s, .peerport = peerport_s };
+    ctx.fd = fd;
+    ctx.res = res;
+
     // main loop (commands)
-    while (1) {
-
-        if (got_sigint) break; // Ctrl+C
-
+    while (!got_sigint) {
         printf("> ");
         fflush(stdout);
 
-        if (fgets(buffer, sizeof(buffer), stdin) == NULL) { // get line from user
-            if (errno == EINTR) { // interrupted by a signal
-                clearerr(stdin); // so the next fgets doesn't fail
-                if (got_sigint) { printf("\n"); break; } // Ctrl+C
-                continue; // other signal, try again
+        if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+            if (errno == EINTR) {
+                clearerr(stdin);
+                if (got_sigint) { printf("\n"); break; }
+                continue;
             }
-            break; // Ctrl+D (EOF) or read error
+            break;                                  // Ctrl+D or read error
         }
 
-        // ignore empty lines
-        if (sscanf(buffer, "%s", cmd) != 1) continue;
-
-        // strcmp avoids "logoutxyz" (for example) being valid
-
-        // LOGIN [login UID password]
-        if (!strcmp(cmd, "login")) {
-            if (strlen(uid) != 0) // user already logged in
-                printf("Already logged in as %s. Use logout first.\n", uid);
-            else if (sscanf(buffer, "%*s %s %s %s", arg1, arg2, extra) != 2) // %*s rules out the string (cmd)
-                printf("Usage: login UID password\n"); // invalid number of arguments
-            else if (login(arg1, arg2, peerport_s, fd, res) == 0) { // successful login
-                strcpy(uid, arg1);
-                strcpy(password, arg2);
-            }
-        }
-
-        // UNREGISTER [unregister]
-        else if (!strcmp(cmd, "unregister")) {
-            if (strlen(uid) == 0) printf("User not logged in.\n"); // no user logged in
-            else if (unregister(uid, password, fd, res) == 0) { // successful unregister
-                strcpy(uid, ""); // local logout
-                strcpy(password, "");
-            }
-        }
-
-        // LOGOUT [logout]
-        else if (!strcmp(cmd, "logout")) {
-            if (strlen(uid) == 0) printf("User not logged in.\n");
-            else if (logout(uid, password, fd, res) == 0) { // successful logout
-                strcpy(uid, ""); // local logout
-                strcpy(password, "");
-            }
-        }
-
-        // PUBLISH [publish filename label]
-        else if (!strcmp(cmd, "publish")) {
-            if (sscanf(buffer, "%*s %s %s %s", arg1, arg2, extra) != 2)
-                printf("Usage: publish filename label\n");
-            else if (strlen(uid) == 0) printf("User not logged in.\n");
-            else publish(uid, password, arg1, arg2, fd, res);
-        }
-
-        // REMOVE [remove filename]
-        else if (!strcmp(cmd, "remove")) {
-            if (sscanf(buffer, "%*s %s %s", arg1, extra) != 1)
-                printf("Usage: remove filename\n");
-            else if (strlen(uid) == 0) printf("User not logged in.\n");
-            else remove_resource(uid, password, arg1, fd, res);
-        }
-
-        // LIST [list]
-        else if (!strcmp(cmd, "list")) list(fd, res);
-
-        // VERSIONS [versions filename]
-        else if (!strcmp(cmd, "versions")) {
-            if (sscanf(buffer, "%*s %s %s", arg1, extra) != 1)
-                printf("Usage: versions filename\n");
-            else
-                versions(arg1, ip, port_s);
-        }
-
-        // EXIT [exit]
-        else if (!strcmp(cmd, "exit")) {
-            if (strlen(uid) != 0) printf("Please logout first.\n");
-            else break;
-        }
-
-        // INVALID COMMAND
-        else printf("No such command.\n");
+        if (sscanf(buffer, "%s", cmd) != 1) continue;   // empty line
+        if (run_command(&ctx, cmd, buffer)) break;      // exit
     }
 
     // logout if user still logged in (Ctrl+C/Ctrl+D)
-    if (strlen(uid) != 0) {
+    if (logged_in(&ctx)) {
         printf("Logging out...\n");
-        logout(uid, password, fd, res);
+        logout(ctx.uid, ctx.password, ctx.fd, ctx.res);
     }
 
     printf("Closing application...\n");
