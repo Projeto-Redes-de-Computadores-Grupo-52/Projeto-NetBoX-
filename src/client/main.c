@@ -17,7 +17,7 @@
 
 #include "common/config.h" // BUF_SIZE, DSIP_1, DSPORT, PORT_MIN/MAX
 #include "client/commands.h" // login, logout, publish, ...
-#include "client/network/udp_client.h" // udp_init_connection
+#include "client/network/udp_client.h" // udp_open
 
 // help message for user application
 #define USAGE "Usage: ./user -m (peerport) [-n (ip)] [-p (port)]\n"
@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
     // if the DS closes the TCP connection in the middle of a write(), treat the error as usual
     signal(SIGPIPE, SIG_IGN);
 
-    // sigaction WITHOUT SA_RESTART, so fgets is interrupted by Ctrl+C
+    // sigaction without SA_RESTART, so fgets is interrupted by Ctrl+C
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handle_sigint;
@@ -101,8 +101,8 @@ int main(int argc, char *argv[]) {
     }
 
     // UDP connection
-    if (udp_init_connection(ip, port_s, &fd, &res)) {
-        printf("Error: udp_init_connection()\n");
+    if (udp_open(ip, port_s, &fd, &res)) {
+        printf("Error: udp_open()\n");
         return 1;
     }
 
@@ -200,6 +200,8 @@ int main(int argc, char *argv[]) {
         printf("Logging out...\n");
         logout(uid, password, fd, res);
     }
+
+    printf("Closing application...\n");
 
     freeaddrinfo(res);
     close(fd);

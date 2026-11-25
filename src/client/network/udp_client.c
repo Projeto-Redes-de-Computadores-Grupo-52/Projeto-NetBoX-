@@ -1,22 +1,21 @@
 /* udp_client.c
  * UDP communication with the Directory Server (DS).
  * Responsibilities:
- *   - init_connection(): create the UDP socket and resolve the DS address
+ *   - udp_open(): create the UDP socket and resolve the DS address
  *   - communicate(): send one request and receive its reply
  */
 
-#include <string.h> // memset, strlen
-#include <unistd.h> // close
+#include <string.h>     // memset, strlen
+#include <unistd.h>     // close
 #include <sys/socket.h> // socket, sendto, recvfrom
-#include <netdb.h> // getaddrinfo, struct addrinfo
-#include <sys/time.h> // struct timeval
+#include <netdb.h>      // getaddrinfo, struct addrinfo
+#include <sys/time.h>   // struct timeval
 #include <errno.h>
-#include <stdio.h>
 
-#include "common/config.h" // BUF_SIZE
+#include "common/config.h"
 #include "client/network/udp_client.h"
 
-int udp_init_connection(const char *ip, const char *port, int *fd, struct addrinfo **res) {
+int udp_open(const char *ip, const char *port, int *fd, struct addrinfo **res) {
 
     struct addrinfo hints; // the kind of address we want
     struct timeval tv;
@@ -44,43 +43,36 @@ int udp_init_connection(const char *ip, const char *port, int *fd, struct addrin
     return 0;
 }
 
-// message is used twice - on input it holds the request (ending in '\n'), on output it holds the reply (no '\n')
-int udp_communicate(int fd, char *message, struct addrinfo *res) {
+int udp_communicate(int fd, const char *request, char *reply, size_t reply_size, struct addrinfo *res) {
 
-    char request[BUF_SIZE+1]; // copy of request for retransmission
     ssize_t n; // bytes sent/received (-1 on error)
     socklen_t addrlen;
     struct sockaddr_in addr;
 
-    snprintf(request, sizeof(request), "%s", message); // copy
-
     for (int attempt = 0; attempt < UDP_MAX_TRIES; attempt++) {
 
-            do { // send the request, try again if interrupted by signal
-                n = sendto(fd, request, strlen(request), 0, res->ai_addr, res->ai_addrlen);
-            } while (n == -1 && errno == EINTR);
-            if (n == -1) return 1; // real error
+        do { // send the request, try again if interrupted by signal
+            n = sendto(fd, request, strlen(request), 0, res->ai_addr, res->ai_addrlen);
+        } while (n == -1 && errno == EINTR);
+        if (n == -1) return 1; // real error
 
-            do { // wait for the reply
-                addrlen = sizeof(addr);
-                n = recvfrom(fd, message, BUF_SIZE, 0, (struct sockaddr *)&addr, &addrlen);
-            } while (n == -1 && errno == EINTR);
+        do { // wait for the reply
+            addrlen = sizeof(addr);
+            n = recvfrom(fd, reply, reply_size-1, 0, (struct sockaddr *)&addr, &addrlen);
+        } while (n == -1 && errno == EINTR);
 
-            if (n >= 0) break; // we got a reply
+        if (n >= 0) break; // we got a reply
 
-            // real error
-            if (errno != EAGAIN && errno != EWOULDBLOCK) return 1;
+        // real error
+        if (errno != EAGAIN && errno != EWOULDBLOCK) return 1;
 
-            // EAGAIN/EWOULDBLOCK timeout, loop and retransmit
+        // EAGAIN/EWOULDBLOCK - timeout, loop and retransmit
     }
 
-    if (n < 0) {
-        printf("No reply from DS (timeout).\n");
-        return 1;
-    }
+    if (n < 0) return 2; // all attempts timed out
 
-    message[n] = '\0';
-    if (n > 0 && message[n-1] == '\n') message[n-1] = '\0'; // remove the '\n' from the reply
+    reply[n] = '\0';
+    if (n > 0 && reply[n-1] == '\n') reply[n-1] = '\0'; // remove '\n' from the reply
 
     return 0;
 }
