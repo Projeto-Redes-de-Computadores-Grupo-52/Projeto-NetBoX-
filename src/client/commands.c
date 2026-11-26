@@ -295,9 +295,19 @@ int versions(const char *filename, const char *ip, const char *port) {
         return 1;
     }
 
-    // print_versions returns 1 if an entry is malformed, so it can be
-    // returned directly as this function's result
-    return print_versions((char *)status + 3);
+    // parse first, print after, a malformed reply prints nothing at all,
+    // instead of a header followed by half a table
+    
+    Version list[MAX_VERSIONS];
+    int n = parse_versions((char *)status + 3, list, MAX_VERSIONS);
+
+    if (n <= 0) { // -1 -> malformed, 0 -> "OK" with no entries (not allowed by the protocol)
+        printf("Malformed reply from DS.\n");
+        return 1;
+    }
+
+    print_versions(list, (size_t)n);
+    return 0;
 }
 
 int where(const char *filename, const char *uid, int fd, struct addrinfo *res,
@@ -320,7 +330,7 @@ int where(const char *filename, const char *uid, int fd, struct addrinfo *res,
 
     if (ds_exchange(fd, request, reply, sizeof(reply), res)) return 1;
 
-    // RWH OK IP peerTCPport / RWH NOK / RWH ERR
+    /* RWH OK IP peerTCPport / RWH NOK / RWH ERR */
     status = reply_status(reply, "RWH");
     if (status == NULL) {
         printf("Unexpected reply from DS.\n");

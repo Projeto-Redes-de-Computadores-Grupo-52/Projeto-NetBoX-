@@ -8,8 +8,9 @@
 #define CONFIG_H
 
 // BUFFERS
-#define BUF_SIZE 4096               // general buffer (user input, UDP request/reply)
-#define VERSIONS_BUF (4 * BUF_SIZE) // the "versions" table could have many entries
+#define BUF_SIZE 4096                       // general buffer (user input, UDP request/reply)
+#define VERSIONS_BUF (4 * BUF_SIZE)         // the "versions" table could have many entries, rather be safe
+#define MAX_VERSIONS (VERSIONS_BUF / 60)    // high estimate 60 bytes per entry ~ 270 entries
 
 // DS
 #define DSIP_1 "193.136.138.142" // outside

@@ -30,29 +30,45 @@ void print_resources(char *names) {
         printf("  %s\n", tok);
 }
 
-int print_versions(char *entries) {
-    // %-8s, left-aligned, minimum width 8, the same widths are used in the
-    // header and in the rows so the columns line up
+int parse_versions(char *entries, Version *out, size_t max) {
+    
+    size_t n = 0;
+
+    for (char *uid = strtok(entries, " "); uid != NULL; uid = strtok(NULL, " ")) {
+        char *size     = strtok(NULL, " ");
+        char *label    = strtok(NULL, " ");
+        char *pub_time = strtok(NULL, " ");
+        char *avail    = strtok(NULL, " ");
+
+        // truncated entry, or more entries than we can hold
+        if (!size || !label || !pub_time || !avail || n >= max) return -1;
+
+        // the length checks make the strcpy calls below safe
+        if (strlen(uid) >= sizeof(out[n].uid) || strlen(size) >= sizeof(out[n].size) ||
+            strlen(label) >= sizeof(out[n].label) || strlen(pub_time) >= sizeof(out[n].pub_time))
+            return -1;
+
+        // anything other than AVL/NAV does not follow the protocol
+        if (strcmp(avail, "AVL") != 0 && strcmp(avail, "NAV") != 0) return -1;
+
+        strcpy(out[n].uid, uid);
+        strcpy(out[n].size, size);
+        strcpy(out[n].label, label);
+        strcpy(out[n].pub_time, pub_time);
+        out[n].available = !strcmp(avail, "AVL");
+        n++;
+    }
+    return (int)n;
+}
+
+void print_versions(const Version *v, size_t n) {
+    // %-8s: left-aligned, minimum width 8
     printf("%-8s %-10s %-20s %-22s %s\n", "UID", "Size", "Label", "Published", "Status");
 
-    // each entry has exactly 5 space-separated fields
-    for (char *uid      = strtok(entries, " "); uid != NULL; uid = strtok(NULL, " ")) {
-         char *size     = strtok(NULL, " ");
-         char *label    = strtok(NULL, " ");
-         char *raw_time = strtok(NULL, " ");
-         char *avail    = strtok(NULL, " ");
-         char when[32]; // "DD-MM-YYYY HH:MM:SS" has 19 chars
-
-         // a truncated reply leaves some field NULL, stop before using it
-        if (!size || !label || !raw_time || !avail) {
-            printf("Malformed reply from DS.\n");
-            return 1;
-        }
-
-        format_time(raw_time, when, sizeof(when));
-        printf("%-8s %-10s %-20s %-22s %s\n", uid, size, label, when,
-               !strcmp(avail, "AVL") ? "Online" : "Offline");
-            // AVL = available, NAV = not available
+    for (size_t i = 0; i < n; i++) {
+        char when[32];
+        format_time(v[i].pub_time, when, sizeof(when));
+        printf("%-8s %-10s %-20s %-22s %s\n", v[i].uid, v[i].size, v[i].label, when,
+               v[i].available ? "Online" : "Offline");
     }
-    return 0;
 }
