@@ -41,7 +41,7 @@ int udp_open(const char *ip, const char *port, int *fd, struct addrinfo **res);
  * @param request     Message to send, ending in '\\n' (not modified).
  * @param reply       [out] Buffer that receives the reply as a C string,
  *                    without the trailing '\\n'.
- * @param reply_size  Total size of @p reply, including space for '\0'.
+ * @param reply_size  Total size of @p reply, including space for '\\0'.
  * @param res         DS address created by udp_open.
  *
  * @return 0 on success,
@@ -50,4 +50,4 @@ int udp_open(const char *ip, const char *port, int *fd, struct addrinfo **res);
  */
 int udp_communicate(int fd, const char *request, char *reply, size_t reply_size, struct addrinfo *res);
 
-#endif
+#endif /* UDP_CLIENT_H */

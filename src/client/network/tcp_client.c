@@ -25,11 +25,11 @@
 
 #include "client/network/tcp_client.h"
 #include "common/config.h"  // TCP_TIMEOUT_SEC
-#include "common/io.h"
+#include "common/io.h"      // io_write_all, io_read_line
 
 int tcp_connect(const char *ip, const char *port) {
     
-    struct addrinfo hints;  // IP version (IPv4), protocol (TCP)
+    struct addrinfo hints;  // IP version (IPv4), protocol (TCP) (what kind of address we want)
     struct addrinfo *res;   // resolved address info
     struct timeval tv;      // timeout value
     int fd;                 // TCP socket
@@ -43,12 +43,14 @@ int tcp_connect(const char *ip, const char *port) {
     // SOCKET()
     fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd == -1) {
-        freeaddrinfo(res);
+        freeaddrinfo(res); // every exit path after getaddrinfo must free res
         return -1;
     }
 
-    // Without timeouts, connect, read and write could block forever.
-    // SO_RCVTIMEO covers read(), SO_SNDTIMEO covers write() and, on Linux, connect().
+    // without timeouts, connect, read and write could block forever    
+    // SO_RCVTIMEO covers read(), SO_SNDTIMEO covers write() and, on Linux, connect()
+    // a failed connect() is never retried, after EINTR the handshake keeps
+    // going in the background, so calling connect() again is not portable
     tv.tv_sec = TCP_TIMEOUT_SEC; 
     tv.tv_usec = 0;
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1 ||
@@ -73,15 +75,17 @@ int tcp_request(const char *ip, const char *port, const char *request,
     if ((fd = tcp_connect(ip, port)) == -1) return 1;
     
     if (io_write_all(fd, request, strlen(request)) == -1) {
-        close(fd);
+        close(fd); // don't leak the socket on the error path
         return 1;
     }
 
+    // io_read_line fails if the reply has no '\n' (buffer full or DS closed
+    // early), so an incomplete reply is never mistaken for a valid one
     total = io_read_line(fd, reply, reply_size);
-    close(fd); // done with the connection
+    close(fd); // one connection per request, always close it here
     
     if (total == -1) return 1;
 
-    reply[total-1] = '\0'; // remove '\n'
+    reply[total-1] = '\0'; // replace the '\n' so callers get a clean C string
     return 0; 
 }

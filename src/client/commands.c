@@ -1,14 +1,25 @@
-#include <stdio.h>
-#include <string.h>
-#include <netdb.h>
-#include <sys/stat.h>
+/* commands.c
+ * User commands: build the protocol message, exchange it with the DS,
+ * interpret the status of the reply and tell the user what happened.
+ *
+ * All commands follow the same pattern:
+ *   1. validate the arguments locally (nothing is sent if they are invalid)
+ *   2. build the request
+ *   3. send it and receive the reply (UDP, or TCP for "versions")
+ *   4. check the reply code and map each status to a message for the user
+ */
 
-#include "common/config.h"
-#include "common/validation.h"
-#include "client/network/udp_client.h"
+#include <stdio.h>
+#include <string.h>     // strcmp, strncmp, strlen
+#include <netdb.h>      // struct addrinfo
+#include <sys/stat.h>   // stat, S_ISREG
+
 #include "client/commands.h"
-#include "client/network/tcp_client.h"
-#include "client/display.h"
+#include "common/config.h"              // BUF_SIZE, VERSIONS_BUF, FSIZE_MAX
+#include "common/validation.h"          // check_uid, check_pwd, check_filename, check_label
+#include "client/network/udp_client.h"  // udp_communicate            
+#include "client/network/tcp_client.h"  // tcp_request
+#include "client/display.h"             // print_resources, print_versions
 
 // this function returns a pointer to the reply status after the reply code
 static const char *reply_status(const char *reply, const char *code) {
@@ -18,7 +29,7 @@ static const char *reply_status(const char *reply, const char *code) {
     return reply+n+1;
 }
 
-// Sends a request and reads the reply. Prints the error. Returns 0 on success.
+// sends a request and reads the reply, prints the error, returns 0 on success
 static int ds_exchange(int fd, const char *request, char *reply, size_t size,
                        struct addrinfo *res) {
     
@@ -35,6 +46,7 @@ int login(const char *uid, const char *password, const char *peerport, int fd, s
     char reply[BUF_SIZE+1];
     const char *status;
 
+    // local validation, the DS would answer ERR, but this saves a round trip
     if (!check_uid(uid)) {
         printf("Invalid UID.\n");
         return 1;
@@ -56,6 +68,7 @@ int login(const char *uid, const char *password, const char *peerport, int fd, s
         return 1;
     }
 
+    // success cases return 0 right away, main only stores the session on 0
     if (!strcmp(status, "OK")) { printf("Successful login.\n"); return 0; }
     if (!strcmp(status, "REG")) { printf("New user registered.\n"); return 0; }
     
@@ -138,11 +151,15 @@ int list(int fd, struct addrinfo *res) {
         return 1;
     }
 
+    // "no resources" is a normal answer, not an error
     if (!strcmp(status, "NOK")) {
         printf("No published resources.\n");
         return 0;
     }
+    // "OK " with the space, the protocol says OK always comes with a list
     if (!strncmp(status, "OK ", 3)) {
+        // the cast drops const because strtok (inside print_resources) writes
+        // into the buffer, it is safe since "reply" is our own local array
         print_resources((char *)status+3);
         return 0;
     }
@@ -158,6 +175,8 @@ int remove_resource(const char *uid, const char *password, const char *filename,
     char reply[BUF_SIZE+1];
     const char *status;
 
+    // the filename is not checked against the local directory here,
+    // removing only concerns what was published, not what is on disk
     if (!check_filename(filename)) {
         printf("Invalid filename.\n");
         return 1;
@@ -190,7 +209,7 @@ int publish(const char *uid, const char *password, const char *filename, const c
     char request[BUF_SIZE+1];
     char reply[BUF_SIZE+1];
     const char *status;
-    struct stat st; // file attributes
+    struct stat st; // file attributes (need the size)
 
     if (!check_filename(filename)) {
         printf("Invalid filename.\n");
@@ -201,6 +220,8 @@ int publish(const char *uid, const char *password, const char *filename, const c
         return 1;
     }
 
+    // checking that the file exists locally before sending
+    // anything, stat also gives us Fsize for the request
     if (stat(filename, &st) == -1 || !S_ISREG(st.st_mode)) {
         printf("File '%s' not found in the local directory. (May not be a regular file)\n", filename);
         return 1;
@@ -211,8 +232,8 @@ int publish(const char *uid, const char *password, const char *filename, const c
     }
 
     // PUB UID password filename Fsize label
-    snprintf(request, sizeof(request), "PUB %s %s %s %ld %s\n",
-             uid, password, filename, (long)st.st_size, label);
+    snprintf(request, sizeof(request), "PUB %s %s %s %ld %s\n", 
+             uid, password, filename, (long)st.st_size, label); // cast to long to match %ld
 
     if (ds_exchange(fd, request, reply, sizeof(reply), res)) return 1;
 
@@ -237,7 +258,7 @@ int publish(const char *uid, const char *password, const char *filename, const c
 int versions(const char *filename, const char *ip, const char *port) {
 
     char request[BUF_SIZE+1];
-    char reply[VERSIONS_BUF];
+    char reply[VERSIONS_BUF]; // larger than the UDP buffer, the list may have many peers
     const char *status;
 
     if (!check_filename(filename)) {
@@ -248,6 +269,7 @@ int versions(const char *filename, const char *ip, const char *port) {
     // VRS filename
     snprintf(request, sizeof(request), "VRS %s\n", filename);
 
+    // unlike UDP, TCP failures all come back as a single error code
     if (tcp_request(ip, port, request, reply, sizeof(reply))) {
         printf("Error: could not get a reply from the DS (TCP).\n");
         return 1;
@@ -273,5 +295,7 @@ int versions(const char *filename, const char *ip, const char *port) {
         return 1;
     }
 
+    // print_versions returns 1 if an entry is malformed, so it can be
+    // returned directly as this function's result
     return print_versions((char *)status + 3);
 }
