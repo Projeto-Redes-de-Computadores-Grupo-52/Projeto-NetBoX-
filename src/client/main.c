@@ -9,16 +9,17 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h> // strtol
-#include <string.h> // strcmp, strcpy, strlen, memset
-#include <unistd.h> // close, getopt, optarg
-#include <signal.h> // signal, sigaction, sig_atomic_t, SIGPIPE, SIGINT
-#include <netdb.h> //struct addrinfo, freeaddrinfo
-#include <errno.h> // errno, EINTR
+#include <stdlib.h>     // strtol
+#include <string.h>     // strcmp, strcpy, strlen, memset
+#include <unistd.h>     // close, getopt, optarg
+#include <signal.h>     // signal, sigaction, sig_atomic_t, SIGPIPE, SIGINT
+#include <netdb.h>      // struct addrinfo, freeaddrinfo
+#include <errno.h>      // errno, EINTR
+#include <arpa/inet.h>  // INET_ADDRSTRLEN
 
-#include "common/config.h" // BUF_SIZE, DSIP_1, DSPORT, PORT_MIN/MAX
-#include "client/commands.h" // login, logout, publish, ...
-#include "client/network/udp_client.h" // udp_open
+#include "common/config.h"              // BUF_SIZE, DSIP_1, DSPORT, PORT_MIN/MAX
+#include "client/commands.h"            // login, logout, publish, ...
+#include "client/network/udp_client.h"  // udp_open
 
 // help message for user application start
 #define USAGE "Usage: ./user -m (peerport) [-n (ip)] [-p (port)]\n"
@@ -142,6 +143,19 @@ static int cmd_exit(Ctx *c, const char *line) {
     return 1; // quit
 }
 
+// TEMPORARY (testing only), "where" is not a keyboard command
+// used internally by "get". Remove with the table entry
+static int cmd_where(Ctx *c, const char *line) {
+    char a1[BUF_SIZE+1], a2[BUF_SIZE+1], extra[BUF_SIZE+1];
+    char ip[INET_ADDRSTRLEN], port[6];
+
+    if (sscanf(line, "%*s %s %s %s", a1, a2, extra) != 2)
+        printf("Usage: where filename UID\n");
+    else if (where(a1, a2, c->fd, c->res, ip, sizeof(ip), port, sizeof(port)) == 0)
+        printf("Peer at %s:%s\n", ip, port);
+    return 0;
+}
+
 // command table: exact name match (so "logoutxyz" is not "logout")
 // adding a command = one handler + one line here
 static const struct {
@@ -155,6 +169,7 @@ static const struct {
     {"remove", cmd_remove},
     {"list", cmd_list},
     {"versions", cmd_versions},
+    {"where", cmd_where}, // TEMPORARY - remove before the final version
     {"exit", cmd_exit},
 };
 

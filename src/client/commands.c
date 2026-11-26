@@ -299,3 +299,48 @@ int versions(const char *filename, const char *ip, const char *port) {
     // returned directly as this function's result
     return print_versions((char *)status + 3);
 }
+
+int where(const char *filename, const char *uid, int fd, struct addrinfo *res,
+          char *ip, size_t ip_size, char *port, size_t port_size) {
+
+    char request[BUF_SIZE+1];
+    char reply[BUF_SIZE+1];
+    const char *status;
+
+    // temporary copies, only written to the caller's buffers once the whole reply has been validated
+    char peer_ip[BUF_SIZE+1], peer_port[BUF_SIZE+1], extra[BUF_SIZE+1];
+
+    if (!check_filename(filename) || !check_uid(uid)) {
+        printf("Invalid filename or UID.\n");
+        return 1;
+    }
+
+    // WHR filename UID
+    snprintf(request, sizeof(request), "WHR %s %s\n", filename, uid);
+
+    if (ds_exchange(fd, request, reply, sizeof(reply), res)) return 1;
+
+    // RWH OK IP peerTCPport / RWH NOK / RWH ERR
+    status = reply_status(reply, "RWH");
+    if (status == NULL) {
+        printf("Unexpected reply from DS.\n");
+        return 1;
+    }
+
+    if (!strncmp(status, "OK ", 3)) {
+        // two fields after "OK ", IP and port
+        if (sscanf(status + 3, "%s %s %s", peer_ip, peer_port, extra) != 2) {
+            printf("Unexpected reply from DS.\n");
+            return 1;
+        }
+        snprintf(ip, ip_size, "%s", peer_ip);
+        snprintf(port, port_size, "%s", peer_port);
+        return 0;
+    }
+
+    if (!strcmp(status, "NOK")) printf("Peer not available.\n");
+    else if (!strcmp(status, "ERR")) printf("Error.\n");
+    else printf("Unexpected reply from DS.\n");
+
+    return 1;
+}

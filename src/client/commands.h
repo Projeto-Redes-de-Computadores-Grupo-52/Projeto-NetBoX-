@@ -20,7 +20,8 @@
 #ifndef COMMANDS_H
 #define COMMANDS_H
 
-#include <netdb.h> // struct addrinfo
+#include <stddef.h> // size_t
+#include <netdb.h>  // struct addrinfo
 
 /**
  * @brief Logs a user in (LIN / RLI). Registers the user if new.
@@ -123,5 +124,19 @@ int publish(const char *uid, const char *password, const char *filename, const c
  * @return 0 on success (including "no peers"), 1 on error.
  */
 int versions(const char *filename, const char *ip, const char *port);
+
+/**
+ * @brief Asks the DS where a peer is (WHR / RWH).
+ *
+ * @param filename  Resource name.
+ * @param uid       UID of the publisher chosen by the user.
+ * @param fd, res   UDP socket and DS address.
+ * @param ip        [out] Peer IP address (at least INET_ADDRSTRLEN bytes).
+ * @param port      [out] Peer TCP port as a string (at least 6 bytes).
+ *
+ * @return 0 if the DS replied OK (ip/port filled), 1 otherwise.
+ */
+int where(const char *filename, const char *uid, int fd, struct addrinfo *res,
+          char *ip, size_t ip_size, char *port, size_t port_size);
 
 #endif /* COMMANDS_H */
