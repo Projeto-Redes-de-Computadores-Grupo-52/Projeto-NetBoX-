@@ -38,7 +38,7 @@ Example:
 ./user -m 58052 -n 193.136.138.142
 ```
 
-## Commands (Phase II)
+## Commands
 
 | Command | Description |
 | --------- | ------------- |
@@ -49,6 +49,7 @@ Example:
 | `remove filename` | Removes one of the user's publications |
 | `list` | Lists the known resources (max. 50) |
 | `versions filename` | Lists who publishes the file (over TCP) |
+| `get filename` | Downloads the file from a peer (over TCP) |
 | `exit` | Quits (requires a prior logout) |
 
 Notes:
@@ -92,3 +93,4 @@ The `server/` folder of the suggested structure will be used in later phases (TC
 - The UDP reply sender address is not checked against the DS.
 - Retransmitting non-idempotent requests (`LOU`, `REM`, `UNR`) may return `NOK`/`NLG` if only the reply was lost.
 - The TCP `connect` relies on `SO_SNDTIMEO` being honored.
+- Availability can change during a `get`. The list from `versions` is a snapshot: between the listing, the choice of UID and the download, a peer may go offline or remove the file (time-of-check to time-of-use). This cannot be eliminated in a distributed system, so it is minimized and handled instead: the DS is asked again (`WHR`) right after the choice and right before connecting, the user is warned when choosing a version, and if the peer is no longer available the `get` fails with a clear message and leaves any existing file untouched.
