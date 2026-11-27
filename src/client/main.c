@@ -17,6 +17,8 @@
 #include <errno.h>      // errno, EINTR
 #include <arpa/inet.h>  // INET_ADDRSTRLEN
 
+#include "common/validation.h" // check_port
+
 #include "common/config.h"              // BUF_SIZE, DSIP_1, DSPORT, PORT_MIN/MAX
 #include "client/commands.h"            // login, logout, publish, ...
 #include "client/network/udp_client.h"  // udp_open
@@ -35,17 +37,7 @@ static void handle_sigint(int sig) {
     got_sigint = 1; // minimum possible: no printf/sendto allowed here
 }
 
-// converts a string into a port number between 1-65535 or 0 if invalid
-// use strtol instead of atoi so "123abc" isn't valid, for example
-static int parse_port(const char *s) {
-    char *end; // first character that was not converted
-    long v = strtol(s, &end, 10);
-
-    if (*s == '\0' || *end != '\0' || v < PORT_MIN || v > PORT_MAX) return 0;
-    return (int)v;
-}
-
-// Everything the commands share: Connection data and current session
+// everything the commands share, connection data and current session
 typedef struct {
     int fd;                         // UDP socket
     struct addrinfo *res;           // resolved DS address
@@ -55,7 +47,7 @@ typedef struct {
     char password[PWD_SIZE+1];
 } Ctx; // context
 
-// the session is "logged in" when the uid is not empty.
+// the session is "logged in" when the uid is not empty
 static int logged_in(const Ctx *c) { return c->uid[0] != '\0'; }
 
 static void clear_session(Ctx *c) { c->uid[0] = c->password[0] = '\0'; }
@@ -64,7 +56,7 @@ static void clear_session(Ctx *c) { c->uid[0] = c->password[0] = '\0'; }
 // each one receives the full line typed by the user and returns 1 only if
 // the application must quit. In every handler, "%*s" reads and discards the
 // command name, and the "extra" variable detects too many arguments (the
-// sscanf return value would be higher than expected).
+// sscanf return value would be higher than expected)
 
 static int cmd_login(Ctx *c, const char *line) {
     char a1[BUF_SIZE+1], a2[BUF_SIZE+1], extra[BUF_SIZE+1];
@@ -127,12 +119,21 @@ static int cmd_list(Ctx *c, const char *line) {
     return 0;
 }
 
-// no login needed; uses TCP, so it needs the DS IP and port
+// no login needed, uses TCP, so it needs the DS IP and port
 static int cmd_versions(Ctx *c, const char *line) {
     char a1[BUF_SIZE+1], extra[BUF_SIZE+1];
 
     if (sscanf(line, "%*s %s %s", a1, extra) != 1) printf("Usage: versions filename\n");
     else versions(a1, c->ip, c->port);
+    return 0;
+}
+
+// get filename: asks for a UID on stdin when there are several versions
+static int cmd_get(Ctx *c, const char *line) {
+    char a1[BUF_SIZE+1], extra[BUF_SIZE+1];
+
+    if (sscanf(line, "%*s %s %s", a1, extra) != 1) printf("Usage: get filename\n");
+    else get(a1, c->ip, c->port, c->fd, c->res); // errors already reported inside, same as pub, rem, lst and vrs
     return 0;
 }
 
@@ -170,6 +171,7 @@ static const struct {
     {"list", cmd_list},
     {"versions", cmd_versions},
     {"where", cmd_where}, // TEMPORARY - remove before the final version
+    {"get", cmd_get},
     {"exit", cmd_exit},
 };
 
@@ -230,11 +232,11 @@ int main(int argc, char *argv[]) {
         printf("No -m flag.\n" USAGE);
         return 1;
     }
-    if (!parse_port(peerport_s)) {
+    if (!check_port(peerport_s)) {
         printf("%s: Invalid peer port (1-65535).\n", peerport_s);
         return 1;
     }
-    if (!parse_port(port_s)) {
+    if (!check_port(port_s)) {
         printf("%s: Invalid DS port (1-65535).\n", port_s);
         return 1;
     }

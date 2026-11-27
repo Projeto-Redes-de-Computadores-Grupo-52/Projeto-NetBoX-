@@ -51,4 +51,20 @@ ssize_t io_read_line(int fd, char *buf, size_t size);
  */
 int io_read_exact(int fd, char *buf, size_t n);
 
+/**
+ * @brief Reads byte by byte until one of the delimiters is found.
+ *
+ * Never reads past the delimiter, so it is safe right before binary data
+ * (the file in "get"), unlike io_read_line.
+ *
+ * @param fd      Descriptor to read from.
+ * @param buf     [out] Token as a C string (delimiter NOT included).
+ * @param size    Total size of @p buf, including space for '\0'.
+ * @param delims  String with the accepted delimiters (e.g. " \n").
+ *
+ * @return The delimiter found (as an unsigned char value), or -1 on error,
+ *         if the peer closed early, or if the token does not fit.
+ */
+int io_read_token(int fd, char *buf, size_t size, const char *delims);
+
 #endif /* IO_H */

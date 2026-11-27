@@ -139,4 +139,29 @@ int versions(const char *filename, const char *ip, const char *port);
 int where(const char *filename, const char *uid, int fd, struct addrinfo *res,
           char *ip, size_t ip_size, char *port, size_t port_size);
 
+/**
+ * @brief Downloads a file from a peer (VRS, then WHR, then GET over TCP).
+ *
+ * Gets the versions of the file from the DS. If there are several, shows
+ * them and asks which UID to download from (blocking read on stdin); if
+ * there is only one and it is online, it is used directly. Before
+ * connecting, the DS is asked again (WHR) for the address of the chosen
+ * peer. Needs no login. The file is saved in the current directory, via a
+ * temporary "filename.tmp" that is renamed only after a complete transfer.
+ *
+ * Peer protocol: request "GET filename\n"; reply "RGT OK <Fsize> " followed
+ * by exactly Fsize bytes, or "RGT NOK\n" (a final '\n' is accepted but not required).
+ *
+ * @param filename  Name of the resource to download.
+ * @param ip        DS IP address (used for the TCP "VRS" request).
+ * @param port      DS port (used for the TCP "VRS" request).
+ * @param fd        UDP socket created by udp_open (used for "WHR").
+ * @param res       DS address created by udp_open.
+ *
+ * @return 0 if the file was downloaded, 1 otherwise (the error is already
+ *         reported to the user).
+ */
+int get(const char *filename, const char *ip, const char *port,
+        int fd, struct addrinfo *res);
+
 #endif /* COMMANDS_H */

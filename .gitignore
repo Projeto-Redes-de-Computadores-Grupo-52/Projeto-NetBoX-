@@ -2,3 +2,4 @@
 *.txt
 !readme.txt
 /user
+*.pdf

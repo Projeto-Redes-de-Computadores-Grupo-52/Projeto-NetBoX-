@@ -13,6 +13,9 @@
 #include <string.h>     // strcmp, strncmp, strlen
 #include <netdb.h>      // struct addrinfo
 #include <sys/stat.h>   // stat, S_ISREG
+#include <stdlib.h>     // size_t
+#include <unistd.h> 
+#include <arpa/inet.h>  //INET_ADDRSTRLEN    
 
 #include "client/commands.h"
 #include "common/config.h"              // BUF_SIZE, VERSIONS_BUF, FSIZE_MAX
@@ -20,8 +23,9 @@
 #include "client/network/udp_client.h"  // udp_communicate            
 #include "client/network/tcp_client.h"  // tcp_request
 #include "client/display.h"             // print_resources, print_versions
+#include "common/io.h"
 
-// this function returns a pointer to the reply status after the reply code
+// returns a pointer to the reply status after the reply code
 static const char *reply_status(const char *reply, const char *code) {
     size_t n = strlen(code);
     // code doesn't match or doesn't have a space after, return NULL
@@ -38,6 +42,162 @@ static int ds_exchange(int fd, const char *request, char *reply, size_t size,
     if (r == 2) printf("No reply from DS (timeout).\n");
     else if (r != 0) printf("Error: communication with the DS failed.\n");
     return r;
+}
+
+// asks the DS for the versions of 'filename' and parses them
+// returns the number of entries (> 0), 0 if nobody publishes the file, or -1
+// on error (already reported to the user), "no peers" is not
+// reported here, so each caller says what fits its context
+static int fetch_versions(const char *filename, const char *ip, const char *port,
+                          Version *list, size_t max) {
+
+    char request[BUF_SIZE+1];
+    char reply[VERSIONS_BUF];
+    const char *status;
+    int n;
+
+    // VRS filename
+    snprintf(request, sizeof(request), "VRS %s\n", filename);
+
+    if (tcp_request(ip, port, request, reply, sizeof(reply))) {
+        printf("Error: could not get a reply from the DS (TCP).\n");
+        return -1;
+    }
+
+    // RVR NOK / RVR OK [UID Fsize label publication_time availability]* / RVR ERR
+    status = reply_status(reply, "RVR");
+    if (status == NULL) {
+        printf("Unexpected reply from DS.\n");
+        return -1;
+    }
+
+    if (!strcmp(status, "NOK")) return 0;
+    if (!strcmp(status, "ERR")) {
+        printf("Error.\n");
+        return -1;
+    }
+    if (strncmp(status, "OK ", 3) != 0) {
+        printf("Unexpected reply from DS.\n");
+        return -1;
+    }
+
+    // parse first, print after: a malformed reply prints nothing at all
+    n = parse_versions((char *)status + 3, list, max);
+    if (n <= 0) {
+        printf("Malformed reply from DS.\n");
+        return -1;
+    }
+    return n;
+}
+
+// downloads 'filename' from ip:port into the current directory
+// writes to "<filename>.tmp" and renames at the end, so a failed or partial
+// transfer never leaves a file under the real name
+// Returns 0 on success, 1 on any error (already reported to the user)
+static int download(const char *filename, const char *ip, const char *port) {
+
+    char request[BUF_SIZE+1];
+    char token[32];                 // "RGT", the status and Fsize
+    char tmp[FILENAME_MAX_LEN + 8]; // temporary file's name
+    char buffer[BUF_SIZE];
+    long fsize;
+    long left;                      // leftovers
+    int fd, d;
+    FILE *f = NULL;
+
+    snprintf(request, sizeof(request), "GET %s\n", filename);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", filename);
+
+    if ((fd = tcp_connect(ip, port)) == -1) {
+        printf("Could not connect to the peer.\n");
+        return 1;
+    }
+    if (io_write_all(fd, request, strlen(request)) == -1) {
+        printf("Could not send the request to the peer.\n");
+        goto fail;
+    }
+
+    // header: "RGT <status> ..." read token by token
+    if (io_read_token(fd, token, sizeof(token), " ") == -1 || strcmp(token, "RGT") != 0) {
+        printf("Unexpected reply from the peer.\n");
+        goto fail;
+    }
+
+    // "OK " ends with a space, "NOK\n" / "ERR\n" end with '\n'
+    if ((d = io_read_token(fd, token, sizeof(token), " \n")) == -1) {
+        printf("Unexpected reply from the peer.\n");
+        goto fail;
+    }
+    if (!strcmp(token, "NOK") && d == '\n') {
+        printf("The peer does not have '%s'.\n", filename);
+        goto fail;
+    }
+    if (strcmp(token, "OK") || d != ' ') {
+        printf("Unexpected reply from the peer.\n");
+        goto fail;
+    }
+
+    // Fsize
+    if (io_read_token(fd, token, sizeof(token), " ") == -1 || !check_fsize(token, &fsize)) {
+        printf("Invalid file size sent by the peer.\n");
+        goto fail;
+    }
+
+    // file contents, exactly fsize bytes, in blocks (BUF_SIZE)
+    if ((f = fopen(tmp, "wb")) == NULL) {
+        printf("Could not create '%s'.\n", tmp);
+        goto fail;
+    }
+    for (left = fsize; left > 0; ) {
+
+        // if the file is smaller than the buffer we only need to read and write once
+        size_t chunk = left > (long)sizeof(buffer) ? sizeof(buffer) : (size_t)left;
+
+        if (io_read_exact(fd, buffer, chunk) == -1) {
+            printf("Transfer interrupted: the peer sent fewer bytes than announced.\n");
+            goto fail;
+        }
+        if (fwrite(buffer, 1, chunk, f) != chunk) { // element size 1, chunk elements
+            printf("Could not write to disk.\n");
+            goto fail;
+        }
+        
+        left -= (long)chunk;
+    }
+
+    // the protocol ends the message with '\n', but the file is already
+    // complete after fsize bytes, so the final '\n' is not required, we do
+    // not read it, and the connection is closed by us, as the protocol says
+
+    // fclose can fail on the final flush, only then is the file really saved
+    if (fclose(f) != 0) {
+        f = NULL;
+        printf("Could not write to disk.\n");
+        goto fail;
+    }
+    
+    f = NULL;
+    close(fd);
+
+    if (rename(tmp, filename) == -1) {
+        printf("Could not rename '%s' to '%s'.\n", tmp, filename);
+        remove(tmp);
+        return 1;
+    }
+
+    printf("Download complete: '%s' saved in the current directory (%ld bytes).\n",
+           filename, fsize);
+    
+    return 0;
+
+    // single cleanup point, never leaves a socket or a partial file behind
+    // could've used functions instead of goto, but in this case it made the code simpler
+
+fail:   
+    if (f != NULL) fclose(f);
+    remove(tmp); // harmless if it was never created
+    close(fd);
+    return 1;
 }
 
 int login(const char *uid, const char *password, const char *peerport, int fd, struct addrinfo *res) {
@@ -257,53 +417,19 @@ int publish(const char *uid, const char *password, const char *filename, const c
 
 int versions(const char *filename, const char *ip, const char *port) {
 
-    char request[BUF_SIZE+1];
-    char reply[VERSIONS_BUF]; // larger than the UDP buffer, the list may have many peers
-    const char *status;
+    Version list[MAX_VERSIONS];
+    int n;
 
     if (!check_filename(filename)) {
         printf("Invalid filename.\n");
         return 1;
     }
 
-    // VRS filename
-    snprintf(request, sizeof(request), "VRS %s\n", filename);
-
-    // unlike UDP, TCP failures all come back as a single error code
-    if (tcp_request(ip, port, request, reply, sizeof(reply))) {
-        printf("Error: could not get a reply from the DS (TCP).\n");
-        return 1;
-    }
-
-    /* RVR NOK / RVR OK [UID Fsize label publication_time availability]* / RVR ERR */
-    status = reply_status(reply, "RVR");
-    if (status == NULL) {
-        printf("Unexpected reply from DS.\n");
-        return 1;
-    }
-
-    if (!strcmp(status, "NOK")) {
+    n = fetch_versions(filename, ip, port, list, MAX_VERSIONS);
+    if (n < 0) return 1;
+    if (n == 0) {
         printf("No peers publishing '%s'.\n", filename);
-        return 0;
-    }
-    if (!strcmp(status, "ERR")) {
-        printf("Error.\n");
-        return 1;
-    }
-    if (strncmp(status, "OK ", 3) != 0) { // reply status is OK, but not in the right format
-        printf("Unexpected reply from DS.\n");
-        return 1;
-    }
-
-    // parse first, print after, a malformed reply prints nothing at all,
-    // instead of a header followed by half a table
-    
-    Version list[MAX_VERSIONS];
-    int n = parse_versions((char *)status + 3, list, MAX_VERSIONS);
-
-    if (n <= 0) { // -1 -> malformed, 0 -> "OK" with no entries (not allowed by the protocol)
-        printf("Malformed reply from DS.\n");
-        return 1;
+        return 0;       // "no peers" is a normal answer, not an error
     }
 
     print_versions(list, (size_t)n);
@@ -353,4 +479,75 @@ int where(const char *filename, const char *uid, int fd, struct addrinfo *res,
     else printf("Unexpected reply from DS.\n");
 
     return 1;
+}
+
+int get(const char *filename, const char *ip, const char *port, int fd, struct addrinfo *res) {
+    
+    char answer[BUF_SIZE+1], uid[BUF_SIZE+1], extra[BUF_SIZE+1]; // user's UID choice
+    char peer_ip[INET_ADDRSTRLEN], peer_port[6];
+    Version list[MAX_VERSIONS];
+    int n, chosen = -1, online = 0;
+
+    if (!check_filename(filename)) {
+        printf("Invalid filename.\n");
+        return 1;
+    }
+
+    // 1. versions of the file
+    n = fetch_versions(filename, ip, port, list, MAX_VERSIONS);
+    if (n < 0) return 1;
+    if (n == 0) {
+        printf("No peers publishing '%s'.\n", filename);
+        return 1; // for get, "nobody has it" is a failure
+    }
+
+    // NOTE: there could be a change of availability to one of the users
+
+    // 2. choose the version
+    for (int i = 0; i < n; i++)
+        if (list[i].available) { online++; chosen = i; } // chosen is here in case there's only one version
+
+    if (online == 0) {
+        print_versions(list, (size_t)n);
+        printf("No peer is online right now.\n");
+        return 1;
+    }
+
+    if (n > 1) { // several versions, show them and ask which UID
+        print_versions(list, (size_t)n);
+        
+        // warn the user here
+        printf("Note: availability may change while you choose. If the download "
+               "fails, run 'versions %s' again to see the current state.\n", filename);
+        
+        printf("UID to download from: ");
+        fflush(stdout);
+        
+        // blocking read on purpose - one command at a time
+        if (fgets(answer, sizeof(answer), stdin) == NULL ||
+            sscanf(answer, "%s %s", uid, extra) != 1) {
+            printf("Cancelled.\n");
+            return 1;
+        }
+        
+        chosen = -1;
+        for (int i = 0; i < n; i++)
+            if (!strcmp(list[i].uid, uid)) chosen = i;
+
+        if (chosen == -1) { printf("That UID does not publish '%s'.\n", filename); return 1; }
+        if (!list[chosen].available) { printf("User %s is offline.\n", uid); return 1; }
+    }
+    
+    // n == 1 and online == 1, chosen already points to the only entry
+
+    // 3. confirm the peer is still active and get its address
+    if (where(filename, list[chosen].uid, fd, res,
+              peer_ip, sizeof(peer_ip), peer_port, sizeof(peer_port))) return 1;
+    if (!check_port(peer_port)) {
+        printf("The DS sent an invalid peer port.\n");
+        return 1;
+    }
+
+    // 4. download
+    return download(filename, peer_ip, peer_port);
 }

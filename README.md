@@ -6,9 +6,9 @@ Redes de Computadores 2026/2027 (LEIC-A) - Group 52
 
 | Name | IST number |
 | ------ | ------------ |
-| `<Diogo Barata>` | `<IST number>` |
-| `<Gustavo>` | `<IST number>` |
-| `<Taha>` | `<IST number>` |
+| `Diogo Barata` | `95563` |
+| `Gustavo` | `` |
+| `Taha` | `` |
 
 ## Build
 

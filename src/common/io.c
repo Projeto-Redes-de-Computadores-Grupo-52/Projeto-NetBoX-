@@ -8,6 +8,7 @@
 
 #include <errno.h>      // errno, EINTR
 #include <unistd.h>     // read, write
+#include <string.h>
 
 #include "common/io.h"
 
@@ -73,4 +74,27 @@ int io_read_exact(int fd, char *buf, size_t n) {
         total += (size_t)r;
     }
     return 0;
+}
+
+int io_read_token(int fd, char *buf, size_t size, const char *delims) {
+
+    size_t total = 0; // characters stored so far
+    char c;
+    ssize_t n;
+
+    while (1) {
+        n = read(fd, &c, 1); // one byte per call
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;              // real error, or timeout
+        }
+        if (n == 0) return -1;      // peer closed before a delimiter
+
+        if (strchr(delims, c) != NULL) {    // found a delimiter
+            buf[total] = '\0';
+            return (unsigned char)c;
+        }
+        if (total + 1 >= size) return -1;   // token too long
+        buf[total++] = c;
+    }
 }

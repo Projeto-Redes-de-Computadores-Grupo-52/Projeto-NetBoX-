@@ -57,4 +57,29 @@ int check_filename(const char *filename);
  */
 int check_label(const char *label);
 
+/**
+ * @brief Checks a port: a decimal integer between PORT_MIN (1) and
+ *        PORT_MAX (65535), with no extra characters.
+ *
+ * Used for the command line arguments and for the peer port sent by the DS.
+ *
+ * @param s  String to check.
+ *
+ * @return 1 if valid, 0 otherwise.
+ */
+int check_port(const char *s);
+
+/**
+ * @brief Checks a file size received from a peer: only digits, at most
+ *        8 of them, and a value from 0 to FSIZE_MAX (10,000,000).
+ *
+ * Signs, spaces and other characters are rejected.
+ *
+ * @param s    String to check.
+ * @param out  [out] The numeric value. Only written when the result is 1.
+ *
+ * @return 1 if valid, 0 otherwise.
+ */
+int check_fsize(const char *s, long *out);
+
 #endif /* VALIDATION_H */

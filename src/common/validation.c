@@ -7,9 +7,16 @@
 
 #include <ctype.h>  // isdigit, isalnum
 #include <string.h> // strlen
+#include <stdlib.h>
 
 #include "common/config.h"      // UID_SIZE, PWD_SIZE, FILENAME_MAX_LEN, LABEL_MAX_LEN
 #include "common/validation.h"
+
+int check_port(const char *s) {
+    char *end;
+    long v = strtol(s, &end, 10);
+    return !(*s == '\0' || *end != '\0' || v < PORT_MIN || v > PORT_MAX);
+}
 
 int check_uid(const char *uid) {
 
@@ -74,5 +81,18 @@ int check_label(const char *label) {
             && label[i] != '-' && label[i] != '_')
             return 0;
 
+    return 1;
+}
+
+int check_fsize(const char *s, long *out) {
+    // only digits, at most 8 (strtol would also accept spaces and signs)
+    if (*s == '\0' || strlen(s) > 8) return 0;
+    for (const char *p = s; *p; p++)
+        if (!isdigit((unsigned char)*p)) return 0;
+
+    long v = strtol(s, NULL, 10);
+    if (v > FSIZE_MAX) return 0;
+
+    *out = v;
     return 1;
 }
