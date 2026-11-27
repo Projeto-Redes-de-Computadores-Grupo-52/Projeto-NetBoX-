@@ -6,8 +6,7 @@
  * connection for each request: connect, send, receive, close.
  *
  * tcp_request() is used by the "versions" command (VRS / RVR).
- * tcp_connect() is exposed so the "get" command (peer-to-peer download)
- * can reuse it in a later phase. Reading and writing on the resulting
+ * tcp_connect() is used by the "get" command. Reading and writing on the resulting
  * socket is done with the helpers in common/io.h.
  */
 

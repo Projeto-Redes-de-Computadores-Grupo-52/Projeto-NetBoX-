@@ -2,7 +2,7 @@
  * UDP communication with the Directory Server (DS).
  * Responsibilities:
  *   - udp_open(): create the UDP socket and resolve the DS address
- *   - communicate(): send one request and receive its reply
+ *   - udp_communicate(): send one request and receive its reply
  */
 
 #include <string.h>     // memset, strlen
@@ -13,8 +13,8 @@
 #include <sys/time.h>   // struct timeval
 #include <errno.h>      // errno, EINTR, EAGAIN, EWOULDBLOCK
 
-#include "common/config.h"
-#include "client/network/udp_client.h" // UDP_TIMEOUT_SEC, UDP_MAX_TRIES
+#include "common/config.h" // UDP_TIMEOUT_SEC, UDP_MAX_TRIES
+#include "client/network/udp_client.h" 
 
 int udp_open(const char *ip, const char *port, int *fd, struct addrinfo **res) {
 

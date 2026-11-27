@@ -153,10 +153,13 @@ int where(const char *filename, const char *uid, int fd, struct addrinfo *res,
  * by exactly Fsize bytes, or "RGT NOK\n" (a final '\n' is accepted but not required).
  *
  * @param filename  Name of the resource to download.
- * @param ip        DS IP address (used for the TCP "VRS" request).
- * @param port      DS port (used for the TCP "VRS" request).
+ * @param uid       UID of the publisher chosen by the user.
  * @param fd        UDP socket created by udp_open (used for "WHR").
  * @param res       DS address created by udp_open.
+ * @param ip        DS IP address (used for the TCP "VRS" request).
+ * @param ip_size   Total size of @p ip (at least INET_ADDRSTRLEN).
+ * @param port      DS port (used for the TCP "VRS" request).
+ * @param port_size Total size of @p port (at least 6).
  *
  * @return 0 if the file was downloaded, 1 otherwise (the error is already
  *         reported to the user).
